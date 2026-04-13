@@ -2041,6 +2041,14 @@ export type VcsCommit = {
   body: string
 }
 
+export type VcsAck = {
+  ok: true
+}
+
+export type VcsSuggest = {
+  message: string
+}
+
 export type Command = {
   name: string
   description?: string
@@ -5283,6 +5291,84 @@ export type VcsCommitResponses = {
 }
 
 export type VcsCommitResponse = VcsCommitResponses[keyof VcsCommitResponses]
+
+export type VcsAmendData = {
+  body: {
+    message: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/amend"
+}
+
+export type VcsAmendResponses = {
+  /**
+   * Amended commit
+   */
+  200: VcsCommit
+}
+
+export type VcsAmendResponse = VcsAmendResponses[keyof VcsAmendResponses]
+
+export type VcsPushData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/push"
+}
+
+export type VcsPushResponses = {
+  /**
+   * Push finished
+   */
+  200: VcsAck
+}
+
+export type VcsPushResponse = VcsPushResponses[keyof VcsPushResponses]
+
+export type VcsSyncData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/sync"
+}
+
+export type VcsSyncResponses = {
+  /**
+   * Sync finished
+   */
+  200: VcsAck
+}
+
+export type VcsSyncResponse = VcsSyncResponses[keyof VcsSyncResponses]
+
+export type VcsSuggestData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/suggest"
+}
+
+export type VcsSuggestResponses = {
+  /**
+   * Suggested commit message
+   */
+  200: VcsSuggest
+}
+
+export type VcsSuggestResponse = VcsSuggestResponses[keyof VcsSuggestResponses]
 
 export type CommandListData = {
   body?: never

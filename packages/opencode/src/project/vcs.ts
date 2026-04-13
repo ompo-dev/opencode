@@ -1,4 +1,5 @@
 import { Effect, Layer, ServiceMap, Stream } from "effect"
+import { Agent } from "@/agent/agent"
 import { formatPatch, structuredPatch } from "diff"
 import path from "path"
 import { Bus } from "@/bus"
@@ -8,6 +9,9 @@ import { makeRuntime } from "@/effect/run-service"
 import { AppFileSystem } from "@/filesystem"
 import { FileWatcher } from "@/file/watcher"
 import { Git } from "@/git"
+import { Provider } from "@/provider/provider"
+import { LLM } from "@/session/llm"
+import { MessageID, SessionID } from "@/session/schema"
 import { Log } from "@/util/log"
 import { Instance } from "./instance"
 import z from "zod"
@@ -201,6 +205,24 @@ export namespace Vcs {
     })
   export type Commit = z.infer<typeof Commit>
 
+  export const Ack = z
+    .object({
+      ok: z.literal(true),
+    })
+    .meta({
+      ref: "VcsAck",
+    })
+  export type Ack = z.infer<typeof Ack>
+
+  export const Suggest = z
+    .object({
+      message: z.string(),
+    })
+    .meta({
+      ref: "VcsSuggest",
+    })
+  export type Suggest = z.infer<typeof Suggest>
+
   export interface Interface {
     readonly init: () => Effect.Effect<void>
     readonly branch: () => Effect.Effect<string | undefined>
@@ -212,6 +234,9 @@ export namespace Vcs {
     readonly unstage: (paths?: string[]) => Effect.Effect<Change[]>
     readonly discard: (paths?: string[]) => Effect.Effect<Change[]>
     readonly commit: (message: string) => Effect.Effect<Commit>
+    readonly amend: (message: string) => Effect.Effect<Commit>
+    readonly push: () => Effect.Effect<Ack>
+    readonly sync: () => Effect.Effect<Ack>
   }
 
   interface State {
@@ -351,6 +376,29 @@ export namespace Vcs {
           })
       })
 
+      const remote = Effect.fn("Vcs.remote")(function* () {
+        const result = yield* git.run(["remote"], { cwd: Instance.directory })
+        if (result.exitCode !== 0) throw new Error(message(result, "Failed to read git remotes"))
+        const list = result
+          .text()
+          .split(/\r?\n/)
+          .map((item) => item.trim())
+          .filter(Boolean)
+        if (list.length === 0) throw new Error("No git remote configured")
+        return list.includes("origin") ? "origin" : list[0]!
+      })
+
+      const push = Effect.fn("Vcs.push")(function* () {
+        if (Instance.project.vcs !== "git") throw new Error("Git is not available for this project")
+
+        const direct = yield* git.run(["push"], { cwd: Instance.directory })
+        if (direct.exitCode === 0) return { ok: true } satisfies Ack
+
+        const next = yield* git.run(["push", "-u", yield* remote(), "HEAD"], { cwd: Instance.directory })
+        if (next.exitCode !== 0) throw new Error(message(next, message(direct, "Failed to push changes")))
+        return { ok: true } satisfies Ack
+      })
+
       const stage = Effect.fn("Vcs.stage")(function* (input?: string[]) {
         if (Instance.project.vcs !== "git") throw new Error("Git is not available for this project")
         const result = yield* git.run(["add", "-A", "--", ...paths(input)], { cwd: Instance.directory })
@@ -418,7 +466,43 @@ export namespace Vcs {
         return (yield* history(1))[0]!
       })
 
-      return Service.of({ init, branch, defaultBranch, diff, status, history, stage, unstage, discard, commit })
+      const amend = Effect.fn("Vcs.amend")(function* (input: string) {
+        if (Instance.project.vcs !== "git") throw new Error("Git is not available for this project")
+        if (!(yield* git.hasHead(Instance.directory))) throw new Error("No commit to amend")
+        const value = input.trim()
+        if (!value) throw new Error("Commit message cannot be empty")
+        const result = yield* git.run(["commit", "--amend", "-m", value], { cwd: Instance.directory })
+        if (result.exitCode !== 0) throw new Error(message(result, "Failed to amend commit"))
+        return (yield* history(1))[0]!
+      })
+
+      const sync = Effect.fn("Vcs.sync")(function* () {
+        if (Instance.project.vcs !== "git") throw new Error("Git is not available for this project")
+
+        const pull = yield* git.run(["pull", "--rebase", "--autostash"], { cwd: Instance.directory })
+        if (pull.exitCode !== 0) {
+          const err = message(pull, "Failed to sync changes")
+          if (!/tracking information|upstream branch|no such ref was fetched/i.test(err)) throw new Error(err)
+        }
+
+        return yield* push()
+      })
+
+      return Service.of({
+        init,
+        branch,
+        defaultBranch,
+        diff,
+        status,
+        history,
+        stage,
+        unstage,
+        discard,
+        commit,
+        amend,
+        push,
+        sync,
+      })
     }),
   )
 
@@ -468,5 +552,114 @@ export namespace Vcs {
 
   export async function commit(message: string) {
     return runPromise((svc) => svc.commit(message))
+  }
+
+  export async function amend(message: string) {
+    return runPromise((svc) => svc.amend(message))
+  }
+
+  export async function push() {
+    return runPromise((svc) => svc.push())
+  }
+
+  export async function sync() {
+    return runPromise((svc) => svc.sync())
+  }
+
+  export async function suggest() {
+    if (Instance.project.vcs !== "git") throw new Error("Git is not available for this project")
+
+    const list = await status()
+    if (list.length === 0) throw new Error("No changes available to generate a commit message")
+
+    const picked = list.filter((item) => item.staged)
+    const scoped = picked.length > 0 ? picked : list.filter((item) => item.unstaged || item.untracked)
+    const seen = new Set(scoped.map((item) => item.path))
+    const patch =
+      picked.length > 0
+        ? (() =>
+            Git.run(["diff", "--cached", "--no-ext-diff", "--", ...picked.map((item) => item.path)], {
+              cwd: Instance.directory,
+            }))().then((result) => {
+            if (result.exitCode !== 0) throw new Error(message(result, "Failed to read staged diff"))
+            return result.text()
+          })
+        : diff("git").then((items) =>
+            items
+              .filter((item) => seen.has(item.file))
+              .map((item) => `### ${item.file}\n${item.patch}`)
+              .join("\n\n"),
+          )
+
+    const [text, recent, cfg, ag] = await Promise.all([
+      patch,
+      history(12).then((list) =>
+        list
+          .map((item) => item.subject)
+          .filter(Boolean)
+          .slice(0, 12),
+      ),
+      Provider.defaultModel(),
+      Agent.get("title"),
+    ])
+
+    if (!text.trim()) throw new Error("No diff available to generate a commit message")
+
+    const mdl = (await Provider.getSmallModel(cfg.providerID)) ?? (await Provider.getModel(cfg.providerID, cfg.modelID))
+    const sessionID = SessionID.make("session_vcs_suggest")
+    const user = {
+      id: MessageID.ascending(),
+      sessionID,
+      role: "user" as const,
+      time: { created: Date.now() },
+      agent: ag.name,
+      model: { providerID: mdl.providerID, modelID: mdl.id },
+    }
+
+    const result = await LLM.stream({
+      agent: ag,
+      user,
+      system: [
+        "You write concise git commit messages.",
+        "Return only the final commit message subject line.",
+        picked.length > 0
+          ? "Use only the staged changes."
+          : "No files are staged, so use the current unstaged changes.",
+        recent.length > 0
+          ? `Match the repository's existing commit style based on these recent examples:\n${recent.map((item) => `- ${item}`).join("\n")}`
+          : "",
+      ].filter(Boolean),
+      small: true,
+      tools: {},
+      model: mdl,
+      abort: AbortSignal.timeout(60_000),
+      sessionID,
+      retries: 2,
+      messages: [
+        {
+          role: "user",
+          content: [
+            "Write a git commit message for these changes.",
+            "Keep it short and follow the repository style.",
+            "Return only the commit message.",
+            "",
+            text.slice(0, 60_000),
+          ].join("\n"),
+        },
+      ],
+    })
+
+    const value = (await result.text)
+      .replace(/<think>[\s\S]*?<\/think>\s*/g, "")
+      .split(/\r?\n/)
+      .map((item: string) => item.trim())
+      .find(Boolean)
+      ?.replace(/^commit message:\s*/i, "")
+      .replace(/^message:\s*/i, "")
+      .replace(/^['"`]+|['"`]+$/g, "")
+      .trim()
+
+    if (!value) throw new Error("Failed to generate commit message")
+    return { message: value } satisfies Suggest
   }
 }

@@ -179,13 +179,17 @@ import type {
   TuiSelectSessionResponses,
   TuiShowToastResponses,
   TuiSubmitPromptResponses,
+  VcsAmendResponses,
   VcsCommitResponses,
   VcsDiscardResponses,
   VcsDiffResponses,
   VcsGetResponses,
   VcsHistoryResponses,
+  VcsPushResponses,
   VcsStageResponses,
   VcsStatusResponses,
+  VcsSuggestResponses,
+  VcsSyncResponses,
   VcsUnstageResponses,
   WorktreeCreateErrors,
   WorktreeCreateInput,
@@ -4239,6 +4243,148 @@ export class Vcs extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<VcsCommitResponses, unknown, ThrowOnError>({
       url: "/vcs/commit",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Amend VCS commit
+   *
+   * Amend the latest git commit with a new message.
+   */
+  public amend<ThrowOnError extends boolean = false>(
+    parameters: {
+      directory?: string
+      workspace?: string
+      message: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "message" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<VcsAmendResponses, unknown, ThrowOnError>({
+      url: "/vcs/amend",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Push VCS changes
+   *
+   * Push the current branch to its remote.
+   */
+  public push<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<VcsPushResponses, unknown, ThrowOnError>({
+      url: "/vcs/push",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Sync VCS changes
+   *
+   * Pull with rebase and then push the current branch.
+   */
+  public sync<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<VcsSyncResponses, unknown, ThrowOnError>({
+      url: "/vcs/sync",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Suggest commit message
+   *
+   * Generate a git commit message from staged changes or current changes when nothing is staged.
+   */
+  public suggest<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<VcsSuggestResponses, unknown, ThrowOnError>({
+      url: "/vcs/suggest",
       ...options,
       ...params,
       headers: {

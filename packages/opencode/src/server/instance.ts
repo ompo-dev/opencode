@@ -340,6 +340,96 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, app: Hono = new Hono()
         return c.json(await Vcs.commit(c.req.valid("json").message))
       },
     )
+    .post(
+      "/vcs/amend",
+      describeRoute({
+        summary: "Amend VCS commit",
+        description: "Amend the latest git commit with a new message.",
+        operationId: "vcs.amend",
+        responses: {
+          200: {
+            description: "Amended commit",
+            content: {
+              "application/json": {
+                schema: resolver(Vcs.Commit),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          message: z.string(),
+        }),
+      ),
+      async (c) => {
+        return c.json(await Vcs.amend(c.req.valid("json").message))
+      },
+    )
+    .post(
+      "/vcs/push",
+      describeRoute({
+        summary: "Push VCS changes",
+        description: "Push the current branch to its remote.",
+        operationId: "vcs.push",
+        responses: {
+          200: {
+            description: "Push finished",
+            content: {
+              "application/json": {
+                schema: resolver(Vcs.Ack),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        return c.json(await Vcs.push())
+      },
+    )
+    .post(
+      "/vcs/sync",
+      describeRoute({
+        summary: "Sync VCS changes",
+        description: "Pull with rebase and then push the current branch.",
+        operationId: "vcs.sync",
+        responses: {
+          200: {
+            description: "Sync finished",
+            content: {
+              "application/json": {
+                schema: resolver(Vcs.Ack),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        return c.json(await Vcs.sync())
+      },
+    )
+    .post(
+      "/vcs/suggest",
+      describeRoute({
+        summary: "Suggest commit message",
+        description: "Generate a git commit message from staged changes or current changes when nothing is staged.",
+        operationId: "vcs.suggest",
+        responses: {
+          200: {
+            description: "Suggested commit message",
+            content: {
+              "application/json": {
+                schema: resolver(Vcs.Suggest),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        return c.json(await Vcs.suggest())
+      },
+    )
     .get(
       "/command",
       describeRoute({
