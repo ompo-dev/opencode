@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@opencode-ai/outline-app",
+  "version": "0.0.1",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@opencode-ai/outline-core": "workspace:*",
+    "@opencode-ai/ui": "workspace:*",
+    "@editorjs/checklist": "^1.6.0",
+    "@editorjs/code": "^2.9.3",
+    "@editorjs/delimiter": "^1.4.0",
+    "@editorjs/editorjs": "^2.31.0",
+    "@editorjs/header": "^2.8.8",
+    "@editorjs/list": "^2.0.8",
+    "@editorjs/quote": "^2.7.6",
+    "@editorjs/table": "^2.4.5",
+    "solid-js": "catalog:"
+  },
+  "devDependencies": {
+    "@tsconfig/node22": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "typescript": "catalog:"
+  }
+}

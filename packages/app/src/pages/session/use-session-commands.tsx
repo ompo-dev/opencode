@@ -248,6 +248,27 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     view().terminal.open()
   }
 
+  const toggleReview = () => {
+    if (!view().reviewPanel.opened()) layout.outline.close()
+    view().reviewPanel.toggle()
+  }
+
+  const toggleFileTree = () => {
+    if (!layout.fileTree.opened()) layout.outline.close()
+    layout.fileTree.toggle()
+  }
+
+  const toggleOutline = () => {
+    const next = !layout.outline.opened()
+    if (!next) {
+      layout.outline.close()
+      return
+    }
+    view().reviewPanel.close()
+    layout.fileTree.close()
+    layout.outline.open()
+  }
+
   const chooseModel = () => {
     void import("@/components/dialog-select-model").then((x) => {
       dialog.show(() => <x.DialogSelectModel model={local.model} />)
@@ -455,13 +476,19 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       id: "review.toggle",
       title: language.t("command.review.toggle"),
       keybind: "mod+shift+r",
-      onSelect: () => view().reviewPanel.toggle(),
+      onSelect: toggleReview,
     }),
     viewCommand({
       id: "fileTree.toggle",
       title: language.t("command.fileTree.toggle"),
       keybind: "mod+\\",
-      onSelect: () => layout.fileTree.toggle(),
+      onSelect: toggleFileTree,
+    }),
+    viewCommand({
+      id: "outline.toggle",
+      title: "Toggle Outline",
+      keybind: "mod+shift+o",
+      onSelect: toggleOutline,
     }),
     viewCommand({
       id: "input.focus",

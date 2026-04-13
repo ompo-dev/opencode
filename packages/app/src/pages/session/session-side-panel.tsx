@@ -15,6 +15,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import FileTree from "@/components/file-tree"
 import { SessionContextUsage } from "@/components/session-context-usage"
 import { SessionContextTab, SortableTab, FileVisual } from "@/components/session"
+import { OutlinePanel } from "@/components/session/outline-panel"
 import { useCommand } from "@/context/command"
 import { useFile, type SelectedLineRange } from "@/context/file"
 import { useLanguage } from "@/context/language"
@@ -49,11 +50,13 @@ export function SessionSidePanel(props: {
 
   const reviewOpen = createMemo(() => isDesktop() && view().reviewPanel.opened())
   const fileOpen = createMemo(() => isDesktop() && layout.fileTree.opened())
-  const open = createMemo(() => reviewOpen() || fileOpen())
+  const outlineOpen = createMemo(() => isDesktop() && layout.outline.opened() && !reviewOpen() && !fileOpen())
+  const open = createMemo(() => reviewOpen() || fileOpen() || outlineOpen())
   const reviewTab = createMemo(() => isDesktop())
   const panelWidth = createMemo(() => {
     if (!open()) return "0px"
     if (reviewOpen()) return `calc(100% - ${layout.session.width()}px)`
+    if (outlineOpen()) return `${layout.outline.width()}px`
     return `${layout.fileTree.width()}px`
   })
   const treeWidth = createMemo(() => (fileOpen() ? `${layout.fileTree.width()}px` : "0px"))
@@ -106,6 +109,7 @@ export function SessionSidePanel(props: {
   }
 
   const openReviewPanel = () => {
+    if (layout.outline.opened()) layout.outline.close()
     if (!view().reviewPanel.opened()) view().reviewPanel.open()
   }
 
@@ -428,6 +432,37 @@ export function SessionSidePanel(props: {
                   onResize={(width) => {
                     props.size.touch()
                     layout.fileTree.resize(width)
+                  }}
+                />
+              </div>
+            </Show>
+          </div>
+          <div
+            id="outline-panel"
+            aria-hidden={!outlineOpen()}
+            inert={!outlineOpen()}
+            class="relative min-w-0 h-full shrink-0 overflow-hidden"
+            classList={{
+              "pointer-events-none": !outlineOpen(),
+              "transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
+                !props.size.active(),
+            }}
+            style={{ width: outlineOpen() ? `${layout.outline.width()}px` : "0px" }}
+          >
+            <div class="h-full border-l border-border-weaker-base bg-background-base">
+              <OutlinePanel width={layout.outline.width()} />
+            </div>
+            <Show when={outlineOpen()}>
+              <div onPointerDown={() => props.size.start()}>
+                <ResizeHandle
+                  direction="horizontal"
+                  edge="start"
+                  size={layout.outline.width()}
+                  min={320}
+                  max={720}
+                  onResize={(width) => {
+                    props.size.touch()
+                    layout.outline.resize(width)
                   }}
                 />
               </div>

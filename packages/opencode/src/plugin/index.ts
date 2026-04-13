@@ -17,6 +17,8 @@ import { makeRuntime } from "@/effect/run-service"
 import { errorMessage } from "@/util/error"
 import { PluginLoader } from "./loader"
 import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
+import { createOutlinePlugin } from "@opencode-ai/outline-server"
+import { Global } from "../global"
 
 export namespace Plugin {
   const log = Log.create({ service: "plugin" })
@@ -54,6 +56,7 @@ export namespace Plugin {
     PoeAuthPlugin,
     CloudflareWorkersAuthPlugin,
     CloudflareAIGatewayAuthPlugin,
+    createOutlinePlugin(Global.Path.data),
   ]
 
   function isServerPlugin(value: unknown): value is PluginInstance {

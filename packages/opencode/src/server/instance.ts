@@ -30,6 +30,7 @@ import { ProviderRoutes } from "./routes/provider"
 import { EventRoutes } from "./routes/event"
 import { errorHandler } from "./middleware"
 import { getMimeType } from "hono/utils/mime"
+import { OutlineRoutes } from "@opencode-ai/outline-server"
 
 const log = Log.create({ service: "server" })
 
@@ -55,6 +56,17 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, app: Hono = new Hono()
     .route("/permission", PermissionRoutes())
     .route("/question", QuestionRoutes())
     .route("/provider", ProviderRoutes())
+    .route(
+      "/outline",
+      OutlineRoutes(() => ({
+        root: Global.Path.data,
+        ctx: {
+          project_id: Instance.project.id,
+          project_name: Instance.project.name,
+          worktree: Instance.worktree,
+        },
+      })),
+    )
     .route("/", FileRoutes())
     .route("/", EventRoutes())
     .route("/mcp", McpRoutes())

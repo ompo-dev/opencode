@@ -16,6 +16,7 @@ import { createPathHelpers } from "./file/path"
 const AVATAR_COLOR_KEYS = ["pink", "mint", "orange", "purple", "cyan", "lime"] as const
 const DEFAULT_SIDEBAR_WIDTH = 344
 const DEFAULT_FILE_TREE_WIDTH = 200
+const DEFAULT_OUTLINE_WIDTH = 440
 const DEFAULT_SESSION_WIDTH = 600
 const DEFAULT_TERMINAL_HEIGHT = 280
 export type AvatarColorKey = (typeof AVATAR_COLOR_KEYS)[number]
@@ -248,6 +249,10 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           opened: false,
           width: DEFAULT_FILE_TREE_WIDTH,
           tab: "changes" as "changes" | "all",
+        },
+        outline: {
+          opened: false,
+          width: DEFAULT_OUTLINE_WIDTH,
         },
         session: {
           width: DEFAULT_SESSION_WIDTH,
@@ -678,6 +683,38 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
             return
           }
           setStore("fileTree", "width", width)
+        },
+      },
+      outline: {
+        opened: createMemo(() => store.outline?.opened ?? false),
+        width: createMemo(() => store.outline?.width ?? DEFAULT_OUTLINE_WIDTH),
+        open() {
+          if (!store.outline) {
+            setStore("outline", { opened: true, width: DEFAULT_OUTLINE_WIDTH })
+            return
+          }
+          setStore("outline", "opened", true)
+        },
+        close() {
+          if (!store.outline) {
+            setStore("outline", { opened: false, width: DEFAULT_OUTLINE_WIDTH })
+            return
+          }
+          setStore("outline", "opened", false)
+        },
+        toggle() {
+          if (!store.outline) {
+            setStore("outline", { opened: true, width: DEFAULT_OUTLINE_WIDTH })
+            return
+          }
+          setStore("outline", "opened", (x) => !x)
+        },
+        resize(width: number) {
+          if (!store.outline) {
+            setStore("outline", { opened: true, width })
+            return
+          }
+          setStore("outline", "width", width)
         },
       },
       session: {

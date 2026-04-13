@@ -207,6 +207,27 @@ export function SessionHeader() {
     focusTerminalById(id)
   }
 
+  const toggleReview = () => {
+    if (!view().reviewPanel.opened()) layout.outline.close()
+    view().reviewPanel.toggle()
+  }
+
+  const toggleFileTree = () => {
+    if (!layout.fileTree.opened()) layout.outline.close()
+    layout.fileTree.toggle()
+  }
+
+  const toggleOutline = () => {
+    const next = !layout.outline.opened()
+    if (!next) {
+      layout.outline.close()
+      return
+    }
+    view().reviewPanel.close()
+    layout.fileTree.close()
+    layout.outline.open()
+  }
+
   const [prefs, setPrefs] = persisted(Persist.global("open.app"), createStore({ app: "finder" as OpenApp }))
   const [menu, setMenu] = createStore({ open: false })
   const [openRequest, setOpenRequest] = createStore({
@@ -442,7 +463,7 @@ export function SessionHeader() {
                     <Button
                       variant="ghost"
                       class="group/review-toggle titlebar-icon w-8 h-6 p-0 box-border"
-                      onClick={() => view().reviewPanel.toggle()}
+                      onClick={toggleReview}
                       aria-label={language.t("command.review.toggle")}
                       aria-expanded={view().reviewPanel.opened()}
                       aria-controls="review-panel"
@@ -458,7 +479,7 @@ export function SessionHeader() {
                     <Button
                       variant="ghost"
                       class="titlebar-icon w-8 h-6 p-0 box-border"
-                      onClick={() => layout.fileTree.toggle()}
+                      onClick={toggleFileTree}
                       aria-label={language.t("command.fileTree.toggle")}
                       aria-expanded={layout.fileTree.opened()}
                       aria-controls="file-tree-panel"
@@ -470,6 +491,28 @@ export function SessionHeader() {
                           classList={{
                             "text-icon-strong": layout.fileTree.opened(),
                             "text-icon-weak": !layout.fileTree.opened(),
+                          }}
+                        />
+                      </div>
+                    </Button>
+                  </TooltipKeybind>
+
+                  <TooltipKeybind title="Toggle Outline" keybind={command.keybind("outline.toggle")}>
+                    <Button
+                      variant="ghost"
+                      class="titlebar-icon w-8 h-6 p-0 box-border"
+                      onClick={toggleOutline}
+                      aria-label="Toggle Outline"
+                      aria-expanded={layout.outline.opened()}
+                      aria-controls="outline-panel"
+                    >
+                      <div class="relative flex items-center justify-center size-4">
+                        <Icon
+                          size="small"
+                          name="task"
+                          classList={{
+                            "text-icon-strong": layout.outline.opened(),
+                            "text-icon-weak": !layout.outline.opened(),
                           }}
                         />
                       </div>
