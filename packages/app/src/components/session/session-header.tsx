@@ -136,7 +136,7 @@ export function SessionHeader() {
   const language = useLanguage()
   const sync = useSync()
   const terminal = useTerminal()
-  const { params, view } = useSessionLayout()
+  const { params, tabs, view } = useSessionLayout()
 
   const projectDirectory = createMemo(() => decode64(params.dir) ?? "")
   const project = createMemo(() => {
@@ -208,7 +208,10 @@ export function SessionHeader() {
   }
 
   const toggleReview = () => {
-    if (!view().reviewPanel.opened()) layout.outline.close()
+    if (!view().reviewPanel.opened()) {
+      layout.outline.close()
+      tabs().setActive("review")
+    }
     view().reviewPanel.toggle()
   }
 

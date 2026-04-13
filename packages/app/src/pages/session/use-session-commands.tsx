@@ -249,7 +249,10 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   }
 
   const toggleReview = () => {
-    if (!view().reviewPanel.opened()) layout.outline.close()
+    if (!view().reviewPanel.opened()) {
+      layout.outline.close()
+      tabs().setActive("review")
+    }
     view().reviewPanel.toggle()
   }
 

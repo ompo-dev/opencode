@@ -14,8 +14,6 @@ function pick(value: string | null, fallback?: string) {
 }
 
 function rewrite(request: Request, directory?: string) {
-  if (request.method !== "GET" && request.method !== "HEAD") return request
-
   const value = pick(request.headers.get("x-opencode-directory"), directory)
   if (!value) return request
 

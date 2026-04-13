@@ -1309,6 +1309,7 @@ export default function Page() {
 
   const focusReviewDiff = (path: string) => {
     openReviewPanel()
+    tabs().setActive("review")
     view().review.openPath(path)
     setTree({ activeDiff: path, pendingDiff: path })
   }

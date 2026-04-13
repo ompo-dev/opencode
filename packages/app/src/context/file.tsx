@@ -9,6 +9,7 @@ import { useSync } from "./sync"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
 import { createPathHelpers } from "./file/path"
+import { merge, score, terms } from "./file/search"
 import {
   approxBytes,
   evictContentLru,
@@ -49,6 +50,17 @@ function errorMessage(error: unknown, fallback: string) {
   return fallback
 }
 
+function editable(content: FileState["content"]) {
+  return content?.type === "text" && !content.encoding
+}
+
+function solid(content: FileState["content"]) {
+  if (!content) return
+  if (content.type !== "text" && content.type !== "binary") return
+  if (typeof content.content !== "string") return
+  return content
+}
+
 export const { use: useFile, provider: FileProvider } = createSimpleContext({
   name: "File",
   gate: false,
@@ -84,7 +96,13 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
     })
 
     const evictContent = (keep?: Set<string>) => {
-      evictContentLru(keep, (target) => {
+      const next = new Set(keep)
+      for (const [key, value] of Object.entries(store.file)) {
+        if (value.draft === undefined) continue
+        next.add(key)
+      }
+
+      evictContentLru(next, (target) => {
         if (!store.file[target]) return
         setStore(
           "file",
@@ -134,7 +152,14 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
         produce((draft) => {
           draft.loaded = true
           draft.loading = false
+          draft.error = undefined
           draft.content = content
+          if (content?.type === "text" && !content.encoding && draft.draft === content.content) {
+            draft.draft = undefined
+            return
+          }
+          if (content?.type === "text" && !content.encoding) return
+          draft.draft = undefined
         }),
       )
     }
@@ -145,6 +170,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
         file,
         produce((draft) => {
           draft.loading = false
+          draft.saving = false
           draft.error = message
         }),
       )
@@ -169,16 +195,16 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       const pending = inflight.get(key)
       if (pending) return pending
 
-      setLoading(file)
+      if (!current?.loaded) setLoading(file)
 
       const promise = sdk.client.file
         .read({ path: file })
         .then((x) => {
           if (scope() !== directory) return
-          const content = x.data
+          const content = solid(x.data)
+          if (!content) throw new Error("Invalid file response")
           setLoaded(file, content)
 
-          if (!content) return
           touchFileContent(file, approxBytes(content))
           evictContent(new Set([file]))
         })
@@ -194,11 +220,28 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       return promise
     }
 
-    const search = (query: string, dirs: "true" | "false") =>
-      sdk.client.find.files({ query, dirs }).then(
+    const search = (query: string, dirs: "true" | "false", limit = 10) =>
+      sdk.client.find.files({ query, dirs, limit }).then(
         (x) => (x.data ?? []).map(path.normalize),
         () => [],
       )
+
+    const text = (query: string, limit = 200) => {
+      const list = terms(query)
+      if (list.length === 0) return Promise.resolve([] as string[])
+
+      return Promise.all(
+        list.map((pattern) =>
+          sdk.client.find.text({ pattern, fixed: true }).then(
+            (x) => (x.data ?? []).map((item) => path.normalize(item.path.text)),
+            () => [],
+          ),
+        ),
+      ).then((results) => score(results, limit))
+    }
+
+    const blend = (query: string, limit = 200) =>
+      Promise.all([search(query, "true", limit), text(query, limit)]).then((results) => merge(results, limit))
 
     const stop = sdk.event.listen((e) => {
       invalidateFromWatcher(e.details, {
@@ -229,7 +272,99 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       return state
     }
 
-    function withPath(input: string, action: (file: string) => unknown) {
+    const value = (input: string) =>
+      withPath(input, (file) => {
+        const state = store.file[file]
+        return state?.draft ?? state?.content?.content ?? ""
+      })
+
+    const dirty = (input: string) =>
+      withPath(input, (file) => {
+        const state = store.file[file]
+        const content = state?.content
+        if (content?.type !== "text" || content.encoding) return false
+        if (state?.draft === undefined) return false
+        return state.draft !== content.content
+      })
+
+    const saving = (input: string) => withPath(input, (file) => store.file[file]?.saving ?? false)
+
+    const setDraft = (input: string, value: string) =>
+      withPath(input, (file) => {
+        const state = store.file[file]
+        if (!editable(state?.content)) return
+        setStore(
+          "file",
+          file,
+          produce((draft) => {
+            if (draft.content?.content === value) {
+              draft.draft = undefined
+              return
+            }
+            draft.draft = value
+          }),
+        )
+      })
+
+    const save = (input: string) =>
+      withPath(input, async (file) => {
+        const state = store.file[file]
+        if (state?.saving) return
+        const base = state?.content
+        if (base?.type !== "text" || base.encoding) return
+        const content = state.draft ?? base.content
+        if (content === base.content && state.draft === undefined) return
+
+        setStore(
+          "file",
+          file,
+          produce((draft) => {
+            draft.saving = true
+            draft.error = undefined
+          }),
+        )
+
+        try {
+          const result = solid(
+            (
+              await sdk.client.file.write({
+                directory: scope(),
+                path: file,
+                content,
+              })
+            ).data,
+          )
+          if (!result) throw new Error("Invalid file response")
+          setLoaded(file, result)
+          touchFileContent(file, approxBytes(result))
+          evictContent(new Set([file]))
+
+          setStore(
+            "file",
+            file,
+            produce((draft) => {
+              draft.saving = false
+            }),
+          )
+        } catch (error) {
+          const message = errorMessage(error, language.t("error.chain.unknown"))
+          setStore(
+            "file",
+            file,
+            produce((draft) => {
+              draft.saving = false
+              draft.error = message
+            }),
+          )
+          showToast({
+            variant: "error",
+            title: language.t("common.save"),
+            description: message,
+          })
+        }
+      })
+
+    function withPath<T>(input: string, action: (file: string) => T) {
       return action(path.normalize(input))
     }
     const scrollTop = (input: string) => withPath(input, (file) => view().scrollTop(file))
@@ -267,14 +402,20 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       },
       get,
       load,
+      value,
+      dirty,
+      saving,
+      setDraft,
+      save,
       scrollTop,
       scrollLeft,
       setScrollTop,
       setScrollLeft,
       selectedLines,
       setSelectedLines,
-      searchFiles: (query: string) => search(query, "false"),
-      searchFilesAndDirectories: (query: string) => search(query, "true"),
+      searchFiles: (query: string, limit?: number) => search(query, "false", limit),
+      searchFilesAndDirectories: (query: string, limit?: number) => search(query, "true", limit),
+      searchTree: (query: string, limit?: number) => blend(query, limit),
     }
   },
 })

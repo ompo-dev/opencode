@@ -1,3 +1,4 @@
+import { Bus } from "@/bus"
 import { BusEvent } from "@/bus/bus-event"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
@@ -10,11 +11,14 @@ import ignore from "ignore"
 import path from "path"
 import z from "zod"
 import { Global } from "../global"
+import { LSP } from "../lsp"
 import { Instance } from "../project/instance"
+import { Format } from "../format"
 import { Filesystem } from "../util/filesystem"
 import { Log } from "../util/log"
 import { Protected } from "./protected"
 import { Ripgrep } from "./ripgrep"
+import { FileWatcher } from "./watcher"
 
 export namespace File {
   export const Info = z
@@ -328,7 +332,8 @@ export namespace File {
   export interface Interface {
     readonly init: () => Effect.Effect<void>
     readonly status: () => Effect.Effect<File.Info[]>
-    readonly read: (file: string) => Effect.Effect<File.Content>
+    readonly read: (file: string, opts?: { diff?: boolean }) => Effect.Effect<File.Content>
+    readonly write: (file: string, content: string) => Effect.Effect<File.Content>
     readonly list: (dir?: string) => Effect.Effect<File.Node[]>
     readonly search: (input: {
       query: string
@@ -510,7 +515,7 @@ export namespace File {
         })
       })
 
-      const read = Effect.fn("File.read")(function* (file: string) {
+      const read = Effect.fn("File.read")(function* (file: string, opts?: { diff?: boolean }) {
         using _ = log.time("read", { file })
         const full = path.join(Instance.directory, file)
 
@@ -534,30 +539,32 @@ export namespace File {
 
         if (isBinaryByExtension(file) && !knownText) return { type: "binary" as const, content: "" }
 
-        const exists = yield* appFs.existsSafe(full)
-        if (!exists) return { type: "text" as const, content: "" }
+        const content = knownText
+          ? yield* appFs.readFileString(full).pipe(Effect.catch(() => Effect.succeed("")))
+          : undefined
 
-        const mimeType = AppFileSystem.mimeType(full)
-        const encode = knownText ? false : shouldEncode(mimeType)
+        if (!knownText) {
+          const exists = yield* appFs.existsSafe(full)
+          if (!exists) return { type: "text" as const, content: "" }
 
-        if (encode && !isImage(mimeType)) return { type: "binary" as const, content: "", mimeType }
+          const mimeType = AppFileSystem.mimeType(full)
+          const encode = shouldEncode(mimeType)
+          if (encode && !isImage(mimeType)) return { type: "binary" as const, content: "", mimeType }
 
-        if (encode) {
-          const bytes = yield* appFs.readFile(full).pipe(Effect.catch(() => Effect.succeed(new Uint8Array())))
-          return {
-            type: "text" as const,
-            content: Buffer.from(bytes).toString("base64"),
-            mimeType,
-            encoding: "base64" as const,
+          if (encode) {
+            const bytes = yield* appFs.readFile(full).pipe(Effect.catch(() => Effect.succeed(new Uint8Array())))
+            return {
+              type: "text" as const,
+              content: Buffer.from(bytes).toString("base64"),
+              mimeType,
+              encoding: "base64" as const,
+            }
           }
         }
 
-        const content = yield* appFs.readFileString(full).pipe(
-          Effect.map((s) => s.trim()),
-          Effect.catch(() => Effect.succeed("")),
-        )
+        const text = content ?? (yield* appFs.readFileString(full).pipe(Effect.catch(() => Effect.succeed(""))))
 
-        if (Instance.project.vcs === "git") {
+        if (opts?.diff && Instance.project.vcs === "git") {
           return yield* Effect.promise(async (): Promise<File.Content> => {
             let diff = (
               await Git.run(["-c", "core.fsmonitor=false", "diff", "--", file], { cwd: Instance.directory })
@@ -571,17 +578,39 @@ export namespace File {
             }
             if (diff.trim()) {
               const original = (await Git.run(["show", `HEAD:${file}`], { cwd: Instance.directory })).text()
-              const patch = structuredPatch(file, file, original, content, "old", "new", {
+              const patch = structuredPatch(file, file, original, text, "old", "new", {
                 context: Infinity,
                 ignoreWhitespace: true,
               })
-              return { type: "text", content, patch, diff: formatPatch(patch) }
+              return { type: "text", content: text, patch, diff: formatPatch(patch) }
             }
-            return { type: "text", content }
+            return { type: "text", content: text }
           })
         }
 
-        return { type: "text" as const, content }
+        return { type: "text" as const, content: text }
+      })
+
+      const write = Effect.fn("File.write")(function* (file: string, content: string) {
+        using _ = log.time("write", { file })
+        const full = path.join(Instance.directory, file)
+
+        if (!Instance.containsPath(full)) throw new Error("Access denied: path escapes project directory")
+
+        const exists = yield* appFs.existsSafe(full)
+        yield* appFs.writeWithDirs(full, content).pipe(Effect.orDie)
+        yield* Effect.promise(() => Bus.publish(Event.Edited, { file: full })).pipe(Effect.catch(() => Effect.void))
+        yield* Effect.promise(() =>
+          Bus.publish(FileWatcher.Event.Updated, {
+            file: full,
+            event: exists ? "change" : "add",
+          }),
+        ).pipe(Effect.catch(() => Effect.void))
+
+        void Format.file(full).catch(() => undefined)
+        void LSP.touchFile(full).catch(() => undefined)
+
+        return yield* read(file)
       })
 
       const list = Effect.fn("File.list")(function* (dir?: string) {
@@ -656,11 +685,11 @@ export namespace File {
       })
 
       log.info("init")
-      return Service.of({ init, status, read, list, search })
+      return Service.of({ init, status, read, write, list, search })
     }),
   )
 
-  export const defaultLayer = layer.pipe(Layer.provide(AppFileSystem.defaultLayer))
+  export const defaultLayer = layer.pipe(Layer.provide(Format.defaultLayer), Layer.provide(AppFileSystem.defaultLayer))
 
   const { runPromise } = makeRuntime(Service, defaultLayer)
 
@@ -672,8 +701,12 @@ export namespace File {
     return runPromise((svc) => svc.status())
   }
 
-  export async function read(file: string): Promise<Content> {
-    return runPromise((svc) => svc.read(file))
+  export async function read(file: string, opts?: { diff?: boolean }): Promise<Content> {
+    return runPromise((svc) => svc.read(file, opts))
+  }
+
+  export async function write(file: string, content: string): Promise<Content> {
+    return runPromise((svc) => svc.write(file, content))
   }
 
   export async function list(dir?: string) {

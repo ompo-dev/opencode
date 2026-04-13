@@ -1,3 +1,5 @@
+/// <reference path="./editorjs-checklist.d.ts" />
+
 import { Button } from "@opencode-ai/ui/button"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"

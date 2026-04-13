@@ -10,7 +10,7 @@ import { useFile } from "@/context/file"
 import { useLanguage } from "@/context/language"
 import { useCommand } from "@/context/command"
 
-export function FileVisual(props: { path: string; active?: boolean }): JSX.Element {
+export function FileVisual(props: { path: string; active?: boolean; dirty?: boolean }): JSX.Element {
   return (
     <div class="flex items-center gap-x-1.5 min-w-0">
       <Show
@@ -23,6 +23,9 @@ export function FileVisual(props: { path: string; active?: boolean }): JSX.Eleme
         </span>
       </Show>
       <span class="text-14-medium truncate">{getFilename(props.path)}</span>
+      <Show when={props.dirty}>
+        <div class="size-1.5 shrink-0 rounded-full bg-text-strong" />
+      </Show>
     </div>
   )
 }
@@ -33,10 +36,15 @@ export function SortableTab(props: { tab: string; onTabClose: (tab: string) => v
   const command = useCommand()
   const sortable = createSortable(props.tab)
   const path = createMemo(() => file.pathFromTab(props.tab))
+  const dirty = createMemo(() => {
+    const value = path()
+    if (!value) return false
+    return file.dirty(value)
+  })
   const content = createMemo(() => {
     const value = path()
     if (!value) return
-    return <FileVisual path={value} />
+    return <FileVisual path={value} dirty={dirty()} />
   })
   return (
     <div use:sortable class="h-full flex items-center" classList={{ "opacity-0": sortable.isActiveDraggable }}>

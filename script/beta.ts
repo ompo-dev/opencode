@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { $ } from "bun"
+
 import fs from "fs/promises"
 
 const model = "opencode/gpt-5.3-codex"

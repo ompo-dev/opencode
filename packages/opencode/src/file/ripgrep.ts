@@ -338,9 +338,11 @@ export namespace Ripgrep {
     glob?: string[]
     limit?: number
     follow?: boolean
+    fixed?: boolean
   }) {
     const args = [`${await filepath()}`, "--json", "--hidden", "--glob=!.git/*"]
     if (input.follow) args.push("--follow")
+    if (input.fixed) args.push("--fixed-strings")
 
     if (input.glob) {
       for (const g of input.glob) {

@@ -832,9 +832,9 @@ describe("file/index Filesystem patterns", () => {
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
-          const result = await File.read("file.txt")
+          const result = await File.read("file.txt", { diff: true })
           expect(result.type).toBe("text")
-          expect(result.content).toBe("modified content")
+          expect(result.content).toBe("modified content\n")
           expect(result.diff).toBeDefined()
           expect(result.diff).toContain("original content")
           expect(result.diff).toContain("modified content")
@@ -856,7 +856,7 @@ describe("file/index Filesystem patterns", () => {
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
-          const result = await File.read("staged.txt")
+          const result = await File.read("staged.txt", { diff: true })
           expect(result.diff).toBeDefined()
           expect(result.patch).toBeDefined()
         },
@@ -873,9 +873,9 @@ describe("file/index Filesystem patterns", () => {
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
-          const result = await File.read("clean.txt")
+          const result = await File.read("clean.txt", { diff: true })
           expect(result.type).toBe("text")
-          expect(result.content).toBe("unchanged")
+          expect(result.content).toBe("unchanged\n")
           expect(result.diff).toBeUndefined()
           expect(result.patch).toBeUndefined()
         },

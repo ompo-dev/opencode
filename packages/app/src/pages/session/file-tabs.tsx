@@ -12,6 +12,7 @@ import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
 import { showToast } from "@opencode-ai/ui/toast"
+import { CodeEditor } from "@/components/code-editor"
 import { selectionFromLines, useFile, type FileSelection, type SelectedLineRange } from "@/context/file"
 import { useComments } from "@/context/comments"
 import { useLanguage } from "@/context/language"
@@ -199,6 +200,20 @@ export function FileTabContent(props: { tab: string }) {
     return file.get(p)
   })
   const contents = createMemo(() => state()?.content?.content ?? "")
+  const value = createMemo(() => {
+    const p = path()
+    if (!p) return ""
+    return file.value(p)
+  })
+  const edit = createMemo(() => {
+    const content = state()?.content
+    return content?.type === "text" && !content.encoding
+  })
+  const saving = createMemo(() => {
+    const p = path()
+    if (!p) return false
+    return file.saving(p)
+  })
   const cacheKey = createMemo(() => sampledChecksum(contents()))
   const selectedLines = createMemo<SelectedLineRange | null>(() => {
     const p = path()
@@ -345,10 +360,12 @@ export function FileTabContent(props: { tab: string }) {
       if (activeFileTab() !== props.tab) return
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
       if (event.key.toLowerCase() !== "f") return
+      if (edit()) return
+      if (!find) return
 
       event.preventDefault()
       event.stopPropagation()
-      find?.focus()
+      find.focus()
     }
 
     makeEventListener(window, "keydown", onKeyDown, { capture: true })
@@ -446,17 +463,58 @@ export function FileTabContent(props: { tab: string }) {
     </div>
   )
 
+  const save = () => {
+    const p = path()
+    if (!p) return
+    if (saving()) return
+    void file.save(p)
+  }
+
+  const renderEditor = () => (
+    <div class="flex h-full min-h-0 flex-col">
+      <div
+        class="relative min-h-0 flex-1 overflow-hidden bg-background-base"
+        onKeyDown={(event) => {
+          if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
+          if (event.key.toLowerCase() !== "s") return
+          event.preventDefault()
+          event.stopPropagation()
+          save()
+        }}
+      >
+        <CodeEditor
+          path={path() ?? ""}
+          value={value()}
+          onInput={(next) => {
+            const p = path()
+            if (!p) return
+            file.setDraft(p, next)
+          }}
+          onSave={save}
+        />
+      </div>
+      <Switch>
+        <Match when={state()?.error}>
+          {(err) => <div class="border-t border-border-base px-4 py-2 text-xs text-text-danger-base">{err()}</div>}
+        </Match>
+      </Switch>
+    </div>
+  )
+
   return (
     <Tabs.Content value={props.tab} class="mt-3 relative h-full">
-      <ScrollView class="h-full" viewportRef={scrollSync.setViewport} onScroll={scrollSync.handleScroll as any}>
-        <Switch>
-          <Match when={state()?.loaded}>{renderFile(contents())}</Match>
-          <Match when={state()?.loading}>
-            <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}...</div>
-          </Match>
-          <Match when={state()?.error}>{(err) => <div class="px-6 py-4 text-text-weak">{err()}</div>}</Match>
-        </Switch>
-      </ScrollView>
+      <Switch>
+        <Match when={state()?.loaded && edit()}>{renderEditor()}</Match>
+        <Match when={state()?.loaded}>
+          <ScrollView class="h-full" viewportRef={scrollSync.setViewport} onScroll={scrollSync.handleScroll as any}>
+            {renderFile(contents())}
+          </ScrollView>
+        </Match>
+        <Match when={state()?.loading}>
+          <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}...</div>
+        </Match>
+        <Match when={state()?.error}>{(err) => <div class="px-6 py-4 text-text-weak">{err()}</div>}</Match>
+      </Switch>
     </Tabs.Content>
   )
 }

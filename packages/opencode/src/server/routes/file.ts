@@ -30,14 +30,17 @@ export const FileRoutes = lazy(() =>
         "query",
         z.object({
           pattern: z.string(),
+          fixed: z.coerce.boolean().optional(),
         }),
       ),
       async (c) => {
         const pattern = c.req.valid("query").pattern
+        const fixed = c.req.valid("query").fixed
         const result = await Ripgrep.search({
           cwd: Instance.directory,
           pattern,
           limit: 10,
+          fixed,
         })
         return c.json(result)
       },
@@ -169,6 +172,42 @@ export const FileRoutes = lazy(() =>
       async (c) => {
         const path = c.req.valid("query").path
         const content = await File.read(path)
+        return c.json(content)
+      },
+    )
+    .post(
+      "/file/content",
+      describeRoute({
+        summary: "Write file",
+        description: "Write and format the content of a specified file.",
+        operationId: "file.write",
+        responses: {
+          200: {
+            description: "File content",
+            content: {
+              "application/json": {
+                schema: resolver(File.Content),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "query",
+        z.object({
+          path: z.string(),
+        }),
+      ),
+      validator(
+        "json",
+        z.object({
+          content: z.string(),
+        }),
+      ),
+      async (c) => {
+        const query = c.req.valid("query")
+        const body = c.req.valid("json")
+        const content = await File.write(query.path, body.content)
         return c.json(content)
       },
     )

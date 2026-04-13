@@ -4343,6 +4343,7 @@ export type FindTextData = {
     directory?: string
     workspace?: string
     pattern: string
+    fixed?: boolean
   }
   url: "/find"
 }
@@ -4454,6 +4455,28 @@ export type FileReadResponses = {
 }
 
 export type FileReadResponse = FileReadResponses[keyof FileReadResponses]
+
+export type FileWriteData = {
+  body: {
+    content: string
+  }
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    path: string
+  }
+  url: "/file/content"
+}
+
+export type FileWriteResponses = {
+  /**
+   * File content
+   */
+  200: FileContent
+}
+
+export type FileWriteResponse = FileWriteResponses[keyof FileWriteResponses]
 
 export type FileStatusData = {
   body?: never

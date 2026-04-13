@@ -1,8 +1,21 @@
-import { For, Match, Show, Switch, createEffect, createMemo, onCleanup, type JSX } from "solid-js"
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  createDeferred,
+  createEffect,
+  createMemo,
+  createResource,
+  createSignal,
+  onCleanup,
+  type JSX,
+} from "solid-js"
 import { createStore } from "solid-js/store"
 import { createMediaQuery } from "@solid-primitives/media"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { IconButton } from "@opencode-ai/ui/icon-button"
+import { TextField } from "@opencode-ai/ui/text-field"
 import { TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
 import { Mark } from "@opencode-ai/ui/logo"
@@ -62,6 +75,12 @@ export function SessionSidePanel(props: {
   const treeWidth = createMemo(() => (fileOpen() ? `${layout.fileTree.width()}px` : "0px"))
 
   const diffFiles = createMemo(() => props.diffs().map((d) => d.file))
+  const norm = (path: string) => path.replaceAll("\\", "/").replace(/\/+$/, "")
+  const mapped = createMemo(() => new Map(diffFiles().map((path) => [norm(path), path])))
+  const focus = (path: string) => {
+    props.focusReviewDiff(mapped().get(norm(path)) ?? path)
+  }
+  const pick = (path: string) => openTab(file.tab(path))
   const kinds = createMemo(() => {
     const merge = (a: "add" | "del" | "mix" | undefined, b: "add" | "del" | "mix") => {
       if (!a) return b
@@ -101,6 +120,16 @@ export function SessionSidePanel(props: {
     const state = file.tree.state("")
     if (!state?.loaded) return false
     return file.tree.children("").length === 0
+  })
+  const [query, setQuery] = createSignal("")
+  const text = createDeferred(createMemo(() => query().trim()))
+  const [found] = createResource(text, (query) => {
+    if (!query) return Promise.resolve([] as string[])
+    return file.searchTree(query, 200)
+  })
+  const filtered = createMemo(() => {
+    if (!text()) return
+    return found() ?? []
   })
 
   const normalizeTab = (tab: string) => {
@@ -398,7 +427,7 @@ export function SessionSidePanel(props: {
                           kinds={kinds()}
                           draggable={false}
                           active={props.activeDiff}
-                          onFileClick={(node) => props.focusReviewDiff(node.path)}
+                          onFileClick={(node) => focus(node.path)}
                         />
                       </Show>
                     </Match>
@@ -407,15 +436,53 @@ export function SessionSidePanel(props: {
                 </Tabs.Content>
                 <Tabs.Content value="all" class="bg-background-stronger px-3 py-0">
                   <Switch>
+                    <Match when={text() && found.loading && (filtered()?.length ?? 0) === 0}>
+                      <div class="px-2 py-2 text-12-regular text-text-weak">
+                        {language.t("common.loading")}
+                        {language.t("common.loading.ellipsis")}
+                      </div>
+                    </Match>
+                    <Match when={text() && (filtered()?.length ?? 0) === 0}>{empty(language.t("palette.empty"))}</Match>
                     <Match when={nofiles()}>{empty(language.t("session.files.empty"))}</Match>
                     <Match when={true}>
-                      <FileTree
-                        path=""
-                        class="pt-3"
-                        modified={diffFiles()}
-                        kinds={kinds()}
-                        onFileClick={(node) => openTab(file.tab(node.path))}
-                      />
+                      <div class="flex h-full flex-col">
+                        <div class="sticky top-0 z-10 bg-background-stronger pt-3 pb-2">
+                          <div class="flex items-start gap-2">
+                            <TextField
+                              label={language.t("session.header.searchFiles")}
+                              hideLabel
+                              multiline
+                              rows={1}
+                              value={query()}
+                              onChange={setQuery}
+                              placeholder={language.t("session.header.searchFiles")}
+                              spellcheck={false}
+                              autocorrect="off"
+                              autocomplete="off"
+                              autocapitalize="off"
+                              variant="ghost"
+                              class="max-h-24 min-h-8 text-12-regular"
+                            />
+                            <Show when={query().trim()}>
+                              <IconButton
+                                icon="close-small"
+                                variant="ghost"
+                                class="mt-1 h-8 w-8 shrink-0 rounded-md"
+                                onClick={() => setQuery("")}
+                                aria-label={language.t("dialog.server.default.clear")}
+                              />
+                            </Show>
+                          </div>
+                        </div>
+                        <FileTree
+                          path=""
+                          class="pb-3"
+                          allowed={filtered()}
+                          modified={diffFiles()}
+                          kinds={kinds()}
+                          onFileClick={(node) => pick(node.path)}
+                        />
+                      </div>
                     </Match>
                   </Switch>
                 </Tabs.Content>
