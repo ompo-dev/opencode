@@ -40,6 +40,37 @@ export namespace Vcs {
     return [...out.values()]
   }
 
+  const kind = (code: string) => {
+    if (code === "??") return "untracked" as const
+    if (code.includes("U")) return "unmerged" as const
+    if (code.includes("A")) return "added" as const
+    if (code.includes("D")) return "deleted" as const
+    return "modified" as const
+  }
+
+  const staged = (code: string) => {
+    const x = code[0]
+    return !!x && x !== " " && x !== "?"
+  }
+
+  const unstaged = (code: string) => {
+    const y = code[1]
+    return !!y && y !== " " && y !== "?"
+  }
+
+  const paths = (list?: string[]) => (list && list.length > 0 ? list : ["."])
+
+  const pick = <T extends { path: string }>(list: T[], input?: string[]) => {
+    if (!input || input.length === 0) return list
+    const set = new Set(input)
+    return list.filter((item) => set.has(item.path))
+  }
+
+  const message = (result: Git.Result, fallback: string) => {
+    const text = result.stderr.toString("utf8").trim() || result.stdout.toString("utf8").trim() || fallback
+    return text.replace(/^fatal:\s*/i, "").trim() || fallback
+  }
+
   const files = Effect.fnUntraced(function* (
     fs: AppFileSystem.Interface,
     git: Git.Interface,
@@ -139,11 +170,48 @@ export namespace Vcs {
     })
   export type FileDiff = z.infer<typeof FileDiff>
 
+  export const Change = z
+    .object({
+      path: z.string(),
+      x: z.string(),
+      y: z.string(),
+      staged: z.boolean(),
+      unstaged: z.boolean(),
+      untracked: z.boolean(),
+      status: z.enum(["added", "deleted", "modified", "unmerged", "untracked"]),
+    })
+    .meta({
+      ref: "VcsChange",
+    })
+  export type Change = z.infer<typeof Change>
+
+  export const Commit = z
+    .object({
+      hash: z.string(),
+      short: z.string(),
+      author: z.string(),
+      email: z.string(),
+      at: z.number().int(),
+      refs: z.string().array(),
+      subject: z.string(),
+      body: z.string(),
+    })
+    .meta({
+      ref: "VcsCommit",
+    })
+  export type Commit = z.infer<typeof Commit>
+
   export interface Interface {
     readonly init: () => Effect.Effect<void>
     readonly branch: () => Effect.Effect<string | undefined>
     readonly defaultBranch: () => Effect.Effect<string | undefined>
     readonly diff: (mode: Mode) => Effect.Effect<FileDiff[]>
+    readonly status: () => Effect.Effect<Change[]>
+    readonly history: (limit?: number) => Effect.Effect<Commit[]>
+    readonly stage: (paths?: string[]) => Effect.Effect<Change[]>
+    readonly unstage: (paths?: string[]) => Effect.Effect<Change[]>
+    readonly discard: (paths?: string[]) => Effect.Effect<Change[]>
+    readonly commit: (message: string) => Effect.Effect<Commit>
   }
 
   interface State {
@@ -194,35 +262,163 @@ export namespace Vcs {
         }),
       )
 
-      return Service.of({
-        init: Effect.fn("Vcs.init")(function* () {
-          yield* InstanceState.get(state)
-        }),
-        branch: Effect.fn("Vcs.branch")(function* () {
-          return yield* InstanceState.use(state, (x) => x.current)
-        }),
-        defaultBranch: Effect.fn("Vcs.defaultBranch")(function* () {
-          return yield* InstanceState.use(state, (x) => x.root?.name)
-        }),
-        diff: Effect.fn("Vcs.diff")(function* (mode: Mode) {
-          const value = yield* InstanceState.get(state)
-          if (Instance.project.vcs !== "git") return []
-          if (mode === "git") {
-            return yield* track(
-              fs,
-              git,
-              Instance.directory,
-              (yield* git.hasHead(Instance.directory)) ? "HEAD" : undefined,
-            )
-          }
-
-          if (!value.root) return []
-          if (value.current && value.current === value.root.name) return []
-          const ref = yield* git.mergeBase(Instance.directory, value.root.ref)
-          if (!ref) return []
-          return yield* compare(fs, git, Instance.directory, ref)
-        }),
+      const init = Effect.fn("Vcs.init")(function* () {
+        yield* InstanceState.get(state)
       })
+
+      const branch = Effect.fn("Vcs.branch")(function* () {
+        return yield* InstanceState.use(state, (x) => x.current)
+      })
+
+      const defaultBranch = Effect.fn("Vcs.defaultBranch")(function* () {
+        return yield* InstanceState.use(state, (x) => x.root?.name)
+      })
+
+      const diff = Effect.fn("Vcs.diff")(function* (mode: Mode) {
+        const value = yield* InstanceState.get(state)
+        if (Instance.project.vcs !== "git") return []
+        if (mode === "git") {
+          return yield* track(
+            fs,
+            git,
+            Instance.directory,
+            (yield* git.hasHead(Instance.directory)) ? "HEAD" : undefined,
+          )
+        }
+
+        if (!value.root) return []
+        if (value.current && value.current === value.root.name) return []
+        const ref = yield* git.mergeBase(Instance.directory, value.root.ref)
+        if (!ref) return []
+        return yield* compare(fs, git, Instance.directory, ref)
+      })
+
+      const status = Effect.fn("Vcs.status")(function* () {
+        if (Instance.project.vcs !== "git") return []
+        const list = yield* git.status(Instance.directory)
+        return list.map((item) => ({
+          path: item.file,
+          x: item.code[0] ?? " ",
+          y: item.code[1] ?? " ",
+          staged: staged(item.code),
+          unstaged: unstaged(item.code),
+          untracked: item.code === "??",
+          status: kind(item.code),
+        }))
+      })
+
+      const history = Effect.fn("Vcs.history")(function* (limit = 40) {
+        if (Instance.project.vcs !== "git") return []
+        if (!(yield* git.hasHead(Instance.directory))) return []
+
+        const result = yield* git.run(
+          [
+            "log",
+            "--decorate=short",
+            `--max-count=${Math.max(1, Math.min(limit, 100))}`,
+            "--all",
+            "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%D%x1f%s%x1f%b%x1e",
+          ],
+          { cwd: Instance.directory },
+        )
+        if (result.exitCode !== 0) throw new Error(message(result, "Failed to read git history"))
+
+        return result
+          .text()
+          .split("\x1e")
+          .flatMap((item) => {
+            const value = item.trim()
+            if (!value) return []
+            const [hash, short, author, email, at, refs, subject, body] = value.split("\x1f")
+            if (!hash || !short || !author || !email || !at || subject === undefined || body === undefined) return []
+            return [
+              {
+                hash,
+                short,
+                author,
+                email,
+                at: Number.parseInt(at, 10) || 0,
+                refs: refs
+                  ? refs
+                      .split(",")
+                      .map((value) => value.trim())
+                      .filter(Boolean)
+                  : [],
+                subject,
+                body: body.trim(),
+              } satisfies Commit,
+            ]
+          })
+      })
+
+      const stage = Effect.fn("Vcs.stage")(function* (input?: string[]) {
+        if (Instance.project.vcs !== "git") throw new Error("Git is not available for this project")
+        const result = yield* git.run(["add", "-A", "--", ...paths(input)], { cwd: Instance.directory })
+        if (result.exitCode !== 0) throw new Error(message(result, "Failed to stage changes"))
+        return yield* status()
+      })
+
+      const unstage = Effect.fn("Vcs.unstage")(function* (input?: string[]) {
+        if (Instance.project.vcs !== "git") throw new Error("Git is not available for this project")
+        const list = pick(yield* status(), input).filter((item) => item.staged)
+        if (list.length === 0) return yield* status()
+
+        if (yield* git.hasHead(Instance.directory)) {
+          const result = yield* git.run(["restore", "--staged", "--", ...list.map((item) => item.path)], {
+            cwd: Instance.directory,
+          })
+          if (result.exitCode !== 0) throw new Error(message(result, "Failed to unstage changes"))
+          return yield* status()
+        }
+
+        const result = yield* git.run(
+          ["rm", "-r", "--cached", "--ignore-unmatch", "--", ...list.map((item) => item.path)],
+          { cwd: Instance.directory },
+        )
+        if (result.exitCode !== 0) throw new Error(message(result, "Failed to unstage changes"))
+        return yield* status()
+      })
+
+      const discard = Effect.fn("Vcs.discard")(function* (input?: string[]) {
+        if (Instance.project.vcs !== "git") throw new Error("Git is not available for this project")
+        const list = pick(yield* status(), input)
+        if (list.length === 0) return yield* status()
+
+        const head = yield* git.hasHead(Instance.directory)
+        const tracked = list.filter((item) => !item.untracked).map((item) => item.path)
+        const fresh = list.filter((item) => item.untracked).map((item) => item.path)
+        const added = !head ? list.filter((item) => item.staged).map((item) => item.path) : []
+
+        if (head && tracked.length > 0) {
+          const result = yield* git.run(["restore", "--staged", "--worktree", "--source=HEAD", "--", ...tracked], {
+            cwd: Instance.directory,
+          })
+          if (result.exitCode !== 0) throw new Error(message(result, "Failed to discard changes"))
+        }
+
+        if (!head && added.length > 0) {
+          const result = yield* git.run(["rm", "-r", "-f", "--", ...added], { cwd: Instance.directory })
+          if (result.exitCode !== 0) throw new Error(message(result, "Failed to discard changes"))
+        }
+
+        if (fresh.length > 0) {
+          const result = yield* git.run(["clean", "-f", "-d", "--", ...fresh], { cwd: Instance.directory })
+          if (result.exitCode !== 0) throw new Error(message(result, "Failed to discard changes"))
+        }
+
+        return yield* status()
+      })
+
+      const commit = Effect.fn("Vcs.commit")(function* (input: string) {
+        if (Instance.project.vcs !== "git") throw new Error("Git is not available for this project")
+        const value = input.trim()
+        if (!value) throw new Error("Commit message cannot be empty")
+        const result = yield* git.run(["commit", "-m", value], { cwd: Instance.directory })
+        if (result.exitCode !== 0) throw new Error(message(result, "Failed to create commit"))
+        return (yield* history(1))[0]!
+      })
+
+      return Service.of({ init, branch, defaultBranch, diff, status, history, stage, unstage, discard, commit })
     }),
   )
 
@@ -248,5 +444,29 @@ export namespace Vcs {
 
   export async function diff(mode: Mode) {
     return runPromise((svc) => svc.diff(mode))
+  }
+
+  export async function status() {
+    return runPromise((svc) => svc.status())
+  }
+
+  export async function history(limit?: number) {
+    return runPromise((svc) => svc.history(limit))
+  }
+
+  export async function stage(paths?: string[]) {
+    return runPromise((svc) => svc.stage(paths))
+  }
+
+  export async function unstage(paths?: string[]) {
+    return runPromise((svc) => svc.unstage(paths))
+  }
+
+  export async function discard(paths?: string[]) {
+    return runPromise((svc) => svc.discard(paths))
+  }
+
+  export async function commit(message: string) {
+    return runPromise((svc) => svc.commit(message))
   }
 }

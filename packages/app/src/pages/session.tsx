@@ -51,6 +51,7 @@ import {
 } from "@/pages/session/helpers"
 import { MessageTimeline } from "@/pages/session/message-timeline"
 import { type DiffStyle, SessionReviewTab, type SessionReviewTabProps } from "@/pages/session/review-tab"
+import { SessionSourceControlPanel } from "@/pages/session/source-control-panel"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { syncSessionModel } from "@/pages/session/session-model-helpers"
 import { SessionSidePanel } from "@/pages/session/session-side-panel"
@@ -524,6 +525,7 @@ export default function Page() {
     messageId: undefined as string | undefined,
     mobileTab: "session" as "session" | "changes",
     changes: "git" as ChangeMode,
+    review: "scm" as "diff" | "scm",
     newSessionWorktree: "main",
     deferRender: false,
   })
@@ -901,6 +903,7 @@ export default function Page() {
       () => {
         setStore("messageId", undefined)
         setStore("changes", "git")
+        setStore("review", "scm")
         setUi("pendingMessage", undefined)
       },
       { defer: true },
@@ -1169,6 +1172,33 @@ export default function Page() {
     )
   }
 
+  const reviewActions = () => (
+    <div class="flex items-center rounded-md border border-border-base bg-background-base p-0.5">
+      <button
+        type="button"
+        class="rounded-[calc(var(--radius-md)-2px)] px-2.5 py-1 text-12-medium transition"
+        classList={{
+          "bg-background-stronger text-text-strong": store.review === "diff",
+          "text-text-weak hover:text-text": store.review !== "diff",
+        }}
+        onClick={() => setStore("review", "diff")}
+      >
+        Diff
+      </button>
+      <button
+        type="button"
+        class="rounded-[calc(var(--radius-md)-2px)] px-2.5 py-1 text-12-medium transition"
+        classList={{
+          "bg-background-stronger text-text-strong": store.review === "scm",
+          "text-text-weak hover:text-text": store.review !== "scm",
+        }}
+        onClick={() => setStore("review", "scm")}
+      >
+        Source Control
+      </button>
+    </div>
+  )
+
   const empty = (text: string) => (
     <div class="h-full pb-64 -mt-4 flex flex-col items-center justify-center text-center gap-6">
       <div class="text-14-regular text-text-weak max-w-56">{text}</div>
@@ -1225,6 +1255,7 @@ export default function Page() {
     <Show when={!store.deferRender}>
       <SessionReviewTab
         title={changesTitle()}
+        actions={reviewActions()}
         empty={reviewEmpty(input)}
         diffs={reviewDiffs}
         view={view}
@@ -1251,12 +1282,29 @@ export default function Page() {
   const reviewPanel = () => (
     <div class="flex flex-col h-full overflow-hidden bg-background-stronger contain-strict">
       <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
-        {reviewContent({
-          diffStyle: layout.review.diffStyle(),
-          onDiffStyleChange: layout.review.setDiffStyle,
-          loadingClass: "px-6 py-4 text-text-weak",
-          emptyClass: "h-full pb-64 -mt-4 flex flex-col items-center justify-center text-center gap-6",
-        })}
+        <Switch>
+          <Match when={store.review === "scm"}>
+            <SessionSourceControlPanel
+              active={() => wantsReview() && activeTab() === "review" && store.review === "scm"}
+              nogit={nogit}
+              createGit={createGit({
+                emptyClass: "h-full px-6 py-6 flex flex-col items-center justify-center text-center gap-6",
+              })}
+              actions={reviewActions()}
+              onChanged={refreshVcs}
+              onFocusInput={focusInput}
+              onReveal={focusReviewDiff}
+            />
+          </Match>
+          <Match when={true}>
+            {reviewContent({
+              diffStyle: layout.review.diffStyle(),
+              onDiffStyleChange: layout.review.setDiffStyle,
+              loadingClass: "px-6 py-4 text-text-weak",
+              emptyClass: "h-full pb-64 -mt-4 flex flex-col items-center justify-center text-center gap-6",
+            })}
+          </Match>
+        </Switch>
       </div>
     </div>
   )
@@ -1308,6 +1356,7 @@ export default function Page() {
   }
 
   const focusReviewDiff = (path: string) => {
+    setStore("review", "diff")
     openReviewPanel()
     tabs().setActive("review")
     view().review.openPath(path)

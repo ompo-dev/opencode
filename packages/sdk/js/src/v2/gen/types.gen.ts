@@ -2020,6 +2020,27 @@ export type VcsFileDiff = {
   status?: "added" | "deleted" | "modified"
 }
 
+export type VcsChange = {
+  path: string
+  x: string
+  y: string
+  staged: boolean
+  unstaged: boolean
+  untracked: boolean
+  status: "added" | "deleted" | "modified" | "unmerged" | "untracked"
+}
+
+export type VcsCommit = {
+  hash: string
+  short: string
+  author: string
+  email: string
+  at: number
+  refs: Array<string>
+  subject: string
+  body: string
+}
+
 export type Command = {
   name: string
   description?: string
@@ -5139,6 +5160,129 @@ export type VcsDiffResponses = {
 }
 
 export type VcsDiffResponse = VcsDiffResponses[keyof VcsDiffResponses]
+
+export type VcsStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/status"
+}
+
+export type VcsStatusResponses = {
+  /**
+   * VCS status
+   */
+  200: Array<VcsChange>
+}
+
+export type VcsStatusResponse = VcsStatusResponses[keyof VcsStatusResponses]
+
+export type VcsHistoryData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    limit?: number
+  }
+  url: "/vcs/history"
+}
+
+export type VcsHistoryResponses = {
+  /**
+   * VCS history
+   */
+  200: Array<VcsCommit>
+}
+
+export type VcsHistoryResponse = VcsHistoryResponses[keyof VcsHistoryResponses]
+
+export type VcsStageData = {
+  body?: {
+    paths?: Array<string>
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/stage"
+}
+
+export type VcsStageResponses = {
+  /**
+   * Updated VCS status
+   */
+  200: Array<VcsChange>
+}
+
+export type VcsStageResponse = VcsStageResponses[keyof VcsStageResponses]
+
+export type VcsUnstageData = {
+  body?: {
+    paths?: Array<string>
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/unstage"
+}
+
+export type VcsUnstageResponses = {
+  /**
+   * Updated VCS status
+   */
+  200: Array<VcsChange>
+}
+
+export type VcsUnstageResponse = VcsUnstageResponses[keyof VcsUnstageResponses]
+
+export type VcsDiscardData = {
+  body?: {
+    paths?: Array<string>
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/discard"
+}
+
+export type VcsDiscardResponses = {
+  /**
+   * Updated VCS status
+   */
+  200: Array<VcsChange>
+}
+
+export type VcsDiscardResponse = VcsDiscardResponses[keyof VcsDiscardResponses]
+
+export type VcsCommitData = {
+  body: {
+    message: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/commit"
+}
+
+export type VcsCommitResponses = {
+  /**
+   * Created commit
+   */
+  200: VcsCommit
+}
+
+export type VcsCommitResponse = VcsCommitResponses[keyof VcsCommitResponses]
 
 export type CommandListData = {
   body?: never

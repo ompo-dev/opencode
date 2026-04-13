@@ -185,6 +185,162 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, app: Hono = new Hono()
       },
     )
     .get(
+      "/vcs/status",
+      describeRoute({
+        summary: "Get VCS status",
+        description: "Retrieve the current git status for the working tree and index.",
+        operationId: "vcs.status",
+        responses: {
+          200: {
+            description: "VCS status",
+            content: {
+              "application/json": {
+                schema: resolver(Vcs.Change.array()),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        return c.json(await Vcs.status())
+      },
+    )
+    .get(
+      "/vcs/history",
+      describeRoute({
+        summary: "Get VCS history",
+        description: "Retrieve recent git commits for the current repository.",
+        operationId: "vcs.history",
+        responses: {
+          200: {
+            description: "VCS history",
+            content: {
+              "application/json": {
+                schema: resolver(Vcs.Commit.array()),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "query",
+        z.object({
+          limit: z.coerce.number().int().min(1).max(100).optional(),
+        }),
+      ),
+      async (c) => {
+        return c.json(await Vcs.history(c.req.valid("query").limit))
+      },
+    )
+    .post(
+      "/vcs/stage",
+      describeRoute({
+        summary: "Stage VCS changes",
+        description: "Stage selected git paths or the entire working tree.",
+        operationId: "vcs.stage",
+        responses: {
+          200: {
+            description: "Updated VCS status",
+            content: {
+              "application/json": {
+                schema: resolver(Vcs.Change.array()),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          paths: z.string().array().optional(),
+        }),
+      ),
+      async (c) => {
+        return c.json(await Vcs.stage(c.req.valid("json").paths))
+      },
+    )
+    .post(
+      "/vcs/unstage",
+      describeRoute({
+        summary: "Unstage VCS changes",
+        description: "Remove selected git paths from the index.",
+        operationId: "vcs.unstage",
+        responses: {
+          200: {
+            description: "Updated VCS status",
+            content: {
+              "application/json": {
+                schema: resolver(Vcs.Change.array()),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          paths: z.string().array().optional(),
+        }),
+      ),
+      async (c) => {
+        return c.json(await Vcs.unstage(c.req.valid("json").paths))
+      },
+    )
+    .post(
+      "/vcs/discard",
+      describeRoute({
+        summary: "Discard VCS changes",
+        description: "Discard selected git changes from the working tree and index.",
+        operationId: "vcs.discard",
+        responses: {
+          200: {
+            description: "Updated VCS status",
+            content: {
+              "application/json": {
+                schema: resolver(Vcs.Change.array()),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          paths: z.string().array().optional(),
+        }),
+      ),
+      async (c) => {
+        return c.json(await Vcs.discard(c.req.valid("json").paths))
+      },
+    )
+    .post(
+      "/vcs/commit",
+      describeRoute({
+        summary: "Create VCS commit",
+        description: "Create a git commit from the current staged changes.",
+        operationId: "vcs.commit",
+        responses: {
+          200: {
+            description: "Created commit",
+            content: {
+              "application/json": {
+                schema: resolver(Vcs.Commit),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          message: z.string(),
+        }),
+      ),
+      async (c) => {
+        return c.json(await Vcs.commit(c.req.valid("json").message))
+      },
+    )
+    .get(
       "/command",
       describeRoute({
         summary: "List commands",

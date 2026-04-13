@@ -179,8 +179,14 @@ import type {
   TuiSelectSessionResponses,
   TuiShowToastResponses,
   TuiSubmitPromptResponses,
+  VcsCommitResponses,
+  VcsDiscardResponses,
   VcsDiffResponses,
   VcsGetResponses,
+  VcsHistoryResponses,
+  VcsStageResponses,
+  VcsStatusResponses,
+  VcsUnstageResponses,
   WorktreeCreateErrors,
   WorktreeCreateInput,
   WorktreeCreateResponses,
@@ -4030,6 +4036,216 @@ export class Vcs extends HeyApiClient {
       url: "/vcs/diff",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Get VCS status
+   *
+   * Retrieve the current git status for the working tree and index.
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<VcsStatusResponses, unknown, ThrowOnError>({
+      url: "/vcs/status",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get VCS history
+   *
+   * Retrieve recent git commits for the current repository.
+   */
+  public history<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      limit?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "limit" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<VcsHistoryResponses, unknown, ThrowOnError>({
+      url: "/vcs/history",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Stage VCS changes
+   *
+   * Stage selected git paths or the entire working tree.
+   */
+  public stage<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      paths?: Array<string>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "paths" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<VcsStageResponses, unknown, ThrowOnError>({
+      url: "/vcs/stage",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Unstage VCS changes
+   *
+   * Remove selected git paths from the index.
+   */
+  public unstage<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      paths?: Array<string>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "paths" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<VcsUnstageResponses, unknown, ThrowOnError>({
+      url: "/vcs/unstage",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Discard VCS changes
+   *
+   * Discard selected git changes from the working tree and index.
+   */
+  public discard<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      paths?: Array<string>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "paths" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<VcsDiscardResponses, unknown, ThrowOnError>({
+      url: "/vcs/discard",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Create VCS commit
+   *
+   * Create a git commit from the current staged changes.
+   */
+  public commit<ThrowOnError extends boolean = false>(
+    parameters: {
+      directory?: string
+      workspace?: string
+      message: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "message" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<VcsCommitResponses, unknown, ThrowOnError>({
+      url: "/vcs/commit",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 }

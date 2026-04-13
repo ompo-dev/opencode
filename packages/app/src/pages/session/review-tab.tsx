@@ -18,6 +18,7 @@ type ReviewDiff = SnapshotFileDiff | VcsFileDiff
 
 export interface SessionReviewTabProps {
   title?: JSX.Element
+  actions?: JSX.Element
   empty?: JSX.Element
   diffs: () => ReviewDiff[]
   view: () => ReturnType<ReturnType<typeof useLayout>["view"]>
@@ -131,6 +132,7 @@ export function SessionReviewTab(props: SessionReviewTabProps) {
   return (
     <SessionReview
       title={props.title}
+      actions={props.actions}
       empty={props.empty}
       scrollRef={(el) => {
         scroll = el

@@ -9,22 +9,32 @@ import z from "zod"
 const scope = z.enum(["global", "project"])
 const attr = z.union([z.string(), z.number(), z.boolean(), z.null()])
 
-const mark = z.object({
-  type: z.string(),
-  attrs: z.record(z.string(), attr).optional(),
-})
-
-const node: z.ZodType<OutlineNode> = z.lazy(() =>
-  z.object({
+const mark = z
+  .object({
     type: z.string(),
-    text: z.string().optional(),
     attrs: z.record(z.string(), attr).optional(),
-    marks: z.array(mark).optional(),
-    content: z.array(node).optional(),
-  }),
-)
+  })
+  .meta({
+    ref: "OutlineMark",
+  })
 
-const body = node.default(outlineEmpty())
+const node: z.ZodType<OutlineNode> = z
+  .lazy(() =>
+    z.object({
+      type: z.string(),
+      text: z.string().optional(),
+      attrs: z.record(z.string(), attr).optional(),
+      marks: z.array(mark).optional(),
+      content: z.array(node).optional(),
+    }),
+  )
+  .meta({
+    ref: "OutlineNode",
+  })
+
+const body = node.default(outlineEmpty()).meta({
+  ref: "OutlineDocumentContent",
+})
 
 const collectionCreate = z.object({
   scope,
@@ -43,19 +53,27 @@ const collectionArchive = z.object({
   archived: z.boolean().optional(),
 })
 
-const documentCreate = z.object({
-  scope,
-  collection_id: z.string(),
-  parent_document_id: z.string().optional(),
-  title: z.string().optional(),
-  content: body.optional(),
-})
+const documentCreate = z
+  .object({
+    scope,
+    collection_id: z.string(),
+    parent_document_id: z.string().optional(),
+    title: z.string().optional(),
+    content: body.optional(),
+  })
+  .meta({
+    ref: "OutlineDocumentCreate",
+  })
 
-const documentUpdate = z.object({
-  scope,
-  title: z.string().optional(),
-  content: body.optional(),
-})
+const documentUpdate = z
+  .object({
+    scope,
+    title: z.string().optional(),
+    content: body.optional(),
+  })
+  .meta({
+    ref: "OutlineDocumentUpdate",
+  })
 
 const documentMove = z.object({
   scope,
@@ -69,14 +87,18 @@ const documentArchive = z.object({
   archived: z.boolean().optional(),
 })
 
-const noteUpsert = z.object({
-  scope: scope.optional(),
-  document_id: z.string().optional(),
-  collection_id: z.string().optional(),
-  parent_document_id: z.string().optional(),
-  title: z.string().optional(),
-  content: body.optional(),
-})
+const noteUpsert = z
+  .object({
+    scope: scope.optional(),
+    document_id: z.string().optional(),
+    collection_id: z.string().optional(),
+    parent_document_id: z.string().optional(),
+    title: z.string().optional(),
+    content: body.optional(),
+  })
+  .meta({
+    ref: "OutlineNoteUpsert",
+  })
 
 const searchInput = z.object({
   scope,
