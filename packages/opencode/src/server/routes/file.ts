@@ -7,6 +7,12 @@ import { LSP } from "../../lsp"
 import { Instance } from "../../project/instance"
 import { lazy } from "../../util/lazy"
 
+function globs(input?: string) {
+  if (!input) return []
+
+  return [...new Set(input.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean))]
+}
+
 export const FileRoutes = lazy(() =>
   new Hono()
     .get(
@@ -31,16 +37,24 @@ export const FileRoutes = lazy(() =>
         z.object({
           pattern: z.string(),
           fixed: z.coerce.boolean().optional(),
+          case: z.coerce.boolean().optional(),
+          word: z.coerce.boolean().optional(),
+          include: z.string().optional(),
+          exclude: z.string().optional(),
+          limit: z.coerce.number().int().min(1).max(1000).optional(),
         }),
       ),
       async (c) => {
-        const pattern = c.req.valid("query").pattern
-        const fixed = c.req.valid("query").fixed
+        const query = c.req.valid("query")
         const result = await Ripgrep.search({
           cwd: Instance.directory,
-          pattern,
-          limit: 10,
-          fixed,
+          pattern: query.pattern,
+          limit: query.limit ?? 200,
+          fixed: query.fixed,
+          case: query.case,
+          word: query.word,
+          include: globs(query.include),
+          exclude: globs(query.exclude),
         })
         return c.json(result)
       },

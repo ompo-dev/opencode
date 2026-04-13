@@ -629,7 +629,7 @@ export function SessionSourceControlPanel(props: {
               key: "review",
               title: "Agent Review",
               body: (
-                <div class="px-3 pb-3">
+                <div class="px-3 pb-3 mt-4">
                   <div class="flex min-w-0 items-center overflow-hidden rounded-md border border-border-weak-base bg-surface-panel">
                     <Button
                       class="h-8 flex-1 rounded-none border-none px-3 shadow-none"

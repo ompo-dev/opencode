@@ -4373,6 +4373,11 @@ export type FindTextData = {
     workspace?: string
     pattern: string
     fixed?: boolean
+    case?: boolean
+    word?: boolean
+    include?: string
+    exclude?: string
+    limit?: number
   }
   url: "/find"
 }

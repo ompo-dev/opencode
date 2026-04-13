@@ -6,7 +6,7 @@
 
 ## Style Guide
 
-### General Principles teste
+### General Principles
 
 - Keep things in one function unless composable or reusable
 - Avoid `try`/`catch` where possible

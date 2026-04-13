@@ -3,16 +3,15 @@ import {
   Match,
   Show,
   Switch,
-  createDeferred,
   createEffect,
   createMemo,
-  createResource,
-  createSignal,
   onCleanup,
   type JSX,
 } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createMediaQuery } from "@solid-primitives/media"
+import { FileIcon } from "@opencode-ai/ui/file-icon"
+import { Icon } from "@opencode-ai/ui/icon"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { TextField } from "@opencode-ai/ui/text-field"
@@ -22,6 +21,7 @@ import { Mark } from "@opencode-ai/ui/logo"
 import { DragDropProvider, DragDropSensors, DragOverlay, SortableProvider, closestCenter } from "@thisbeyond/solid-dnd"
 import type { DragEvent } from "@thisbeyond/solid-dnd"
 import type { SnapshotFileDiff, VcsFileDiff } from "@opencode-ai/sdk/v2"
+import { getDirectory, getFilename } from "@opencode-ai/util/path"
 import { ConstrainDragYAxis, getDraggableId } from "@/utils/solid-dnd"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 
@@ -33,10 +33,12 @@ import { useCommand } from "@/context/command"
 import { useFile, type SelectedLineRange } from "@/context/file"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
+import { useSDK } from "@/context/sdk"
 import { createFileTabListSync } from "@/pages/session/file-tab-scroll"
 import { FileTabContent } from "@/pages/session/file-tabs"
 import { createOpenSessionFileTab, createSessionTabs, getTabReorderIndex, type Sizing } from "@/pages/session/helpers"
 import { setSessionHandoff } from "@/pages/session/handoff"
+import { flat, group, has, parts, pats, rows, squash, stitch, uniq } from "@/pages/session/session-side-panel-search"
 import { useSessionLayout } from "@/pages/session/session-layout"
 
 export function SessionSidePanel(props: {
@@ -57,6 +59,7 @@ export function SessionSidePanel(props: {
   const language = useLanguage()
   const command = useCommand()
   const dialog = useDialog()
+  const sdk = useSDK()
   const { sessionKey, tabs, view } = useSessionLayout()
 
   const isDesktop = createMediaQuery("(min-width: 768px)")
@@ -81,6 +84,7 @@ export function SessionSidePanel(props: {
     props.focusReviewDiff(mapped().get(norm(path)) ?? path)
   }
   const pick = (path: string) => openTab(file.tab(path))
+  const where = (path: string) => getDirectory(path) || "/"
   const kinds = createMemo(() => {
     const merge = (a: "add" | "del" | "mix" | undefined, b: "add" | "del" | "mix") => {
       if (!a) return b
@@ -121,16 +125,116 @@ export function SessionSidePanel(props: {
     if (!state?.loaded) return false
     return file.tree.children("").length === 0
   })
-  const [query, setQuery] = createSignal("")
-  const text = createDeferred(createMemo(() => query().trim()))
-  const [found] = createResource(text, (query) => {
-    if (!query) return Promise.resolve([] as string[])
-    return file.searchTree(query, 200)
+
+  const [store, setStore] = createStore({
+    activeDraggable: undefined as string | undefined,
+    search: {
+      q: "",
+      raw: "",
+      include: "",
+      exclude: "",
+      fixed: true,
+      case: false,
+      word: false,
+      loading: false,
+      hits: [] as ReturnType<typeof flat>,
+      err: "",
+      open: {} as Record<string, boolean>,
+    },
   })
-  const filtered = createMemo(() => {
-    if (!text()) return
-    return found() ?? []
+
+  const text = createMemo(() => (store.search.raw || store.search.q).trim())
+  const opts = createMemo(() => ({
+    pattern: store.search.raw || store.search.q,
+    include: store.search.include.trim() || undefined,
+    exclude: store.search.exclude.trim() || undefined,
+    fixed: store.search.fixed,
+    case: store.search.case,
+    word: store.search.word,
+    limit: 200,
+  }))
+
+  let search = 0
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  createEffect(() => {
+    const input = opts()
+
+    if (timer) clearTimeout(timer)
+
+    if (!input.pattern) {
+      search += 1
+      setStore("search", "loading", false)
+      setStore("search", "hits", [])
+      setStore("search", "err", "")
+      return
+    }
+
+    const id = ++search
+    const list = pats(input.pattern)
+    const line = input.fixed ? rows(input.pattern) : []
+    const multi = input.fixed && /\r?\n/.test(input.pattern)
+    if (list.length === 0) {
+      setStore("search", "loading", false)
+      setStore("search", "hits", [])
+      setStore("search", "err", "")
+      return
+    }
+    setStore("search", "loading", true)
+
+    timer = setTimeout(() => {
+      const run =
+        multi
+          ? sdk.client.find
+              .text({ ...input, pattern: input.pattern })
+              .then((result) =>
+                uniq(flat(result.data, file.normalize)).filter((hit) => has(hit.line, input.pattern, input.case === true)),
+              )
+              .catch(() => [] as ReturnType<typeof flat>)
+              .then((hits) => {
+                if (hits.length > 0 || line.length <= 1) return hits
+                return Promise.all(line.map((pattern) => sdk.client.find.text({ ...input, pattern }))).then((results) =>
+                  stitch(results.map((result) => flat(result.data, file.normalize))).filter((hit) =>
+                    has(hit.line, input.pattern, input.case === true),
+                  ),
+                )
+              })
+          : line.length > 1
+            ? Promise.all(line.map((pattern) => sdk.client.find.text({ ...input, pattern }))).then((results) =>
+                stitch(results.map((result) => flat(result.data, file.normalize))).filter((hit) =>
+                  has(hit.line, input.pattern, input.case === true),
+                ),
+              )
+            : Promise.all(list.map((pattern) => sdk.client.find.text({ ...input, pattern }))).then((results) =>
+                uniq(results.flatMap((result) => flat(result.data, file.normalize))),
+              )
+
+      void run
+        .then((results) => {
+          if (id !== search) return
+          setStore("search", "hits", results)
+          setStore("search", "err", "")
+        })
+        .catch((err) => {
+          if (id !== search) return
+          setStore("search", "err", err instanceof Error && err.message ? err.message : language.t("common.requestFailed"))
+        })
+        .finally(() => {
+          if (id !== search) return
+          setStore("search", "loading", false)
+        })
+    }, 40)
   })
+
+  onCleanup(() => {
+    search += 1
+    if (timer) clearTimeout(timer)
+  })
+
+  const filtered = createMemo(() => store.search.hits)
+  const grouped = createMemo(() => group(filtered()))
+  const total = createMemo(() => filtered().length)
+  const files = createMemo(() => grouped().length)
 
   const normalizeTab = (tab: string) => {
     if (!tab.startsWith("file://")) return tab
@@ -175,10 +279,6 @@ export function SessionSidePanel(props: {
     layout.fileTree.setTab("all")
   }
 
-  const [store, setStore] = createStore({
-    activeDraggable: undefined as string | undefined,
-  })
-
   const handleDragStart = (event: unknown) => {
     const id = getDraggableId(event)
     if (!id) return
@@ -198,6 +298,18 @@ export function SessionSidePanel(props: {
   const handleDragEnd = () => {
     setStore("activeDraggable", undefined)
   }
+
+  const openHit = (path: string, start?: number, end?: number) => {
+    pick(path)
+    if (!start) return
+    file.setSelectedLines(path, null)
+    requestAnimationFrame(() => {
+      file.setSelectedLines(path, { start, end: end ?? start })
+    })
+  }
+
+  const shown = (path: string) => store.search.open[path] !== false
+  const toggle = (path: string) => setStore("search", "open", path, !shown(path))
 
   createEffect(() => {
     if (!file.ready()) return
@@ -435,56 +547,238 @@ export function SessionSidePanel(props: {
                   </Switch>
                 </Tabs.Content>
                 <Tabs.Content value="all" class="bg-background-stronger px-3 py-0">
-                  <Switch>
-                    <Match when={text() && found.loading && (filtered()?.length ?? 0) === 0}>
-                      <div class="px-2 py-2 text-12-regular text-text-weak">
-                        {language.t("common.loading")}
-                        {language.t("common.loading.ellipsis")}
-                      </div>
-                    </Match>
-                    <Match when={text() && (filtered()?.length ?? 0) === 0}>{empty(language.t("palette.empty"))}</Match>
-                    <Match when={nofiles()}>{empty(language.t("session.files.empty"))}</Match>
-                    <Match when={true}>
-                      <div class="flex h-full flex-col">
-                        <div class="sticky top-0 z-10 bg-background-stronger pt-3 pb-2">
-                          <div class="flex items-start gap-2">
-                            <TextField
-                              label={language.t("session.header.searchFiles")}
-                              hideLabel
-                              multiline
-                              rows={1}
-                              value={query()}
-                              onChange={setQuery}
-                              placeholder={language.t("session.header.searchFiles")}
-                              spellcheck={false}
-                              autocorrect="off"
-                              autocomplete="off"
-                              autocapitalize="off"
-                              variant="ghost"
-                              class="max-h-24 min-h-8 text-12-regular"
-                            />
-                            <Show when={query().trim()}>
+                  <Show when={!nofiles()} fallback={empty(language.t("session.files.empty"))}>
+                    <div class="flex h-full flex-col">
+                      <div class="sticky top-0 z-10 bg-background-stronger pt-3 pb-2">
+                        <div class="flex items-start gap-2">
+                          <TextField
+                            label={language.t("session.header.searchFiles")}
+                            hideLabel
+                            value={store.search.q}
+                            onChange={(value) => {
+                              setStore("search", "q", value)
+                              setStore("search", "raw", "")
+                            }}
+                            onPaste={(event: ClipboardEvent) => {
+                              const text = event.clipboardData?.getData("text")
+                              if (!text?.includes("\n")) return
+                              event.preventDefault()
+                              setStore("search", "q", squash(text))
+                              setStore("search", "raw", text)
+                            }}
+                            placeholder="Find in files"
+                            spellcheck={false}
+                            autocorrect="off"
+                            autocomplete="off"
+                            autocapitalize="off"
+                            variant="ghost"
+                            class="max-h-24 min-h-8 text-12-regular"
+                          />
+                          <div class="mt-1 flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              class="flex h-8 min-w-8 items-center justify-center rounded-md border px-2 text-[11px] font-medium"
+                              classList={{
+                                "border-border-weak-base bg-surface-panel text-text-strong": store.search.case,
+                                "border-transparent text-text-weak hover:border-border-weak-base hover:bg-surface-panel":
+                                  !store.search.case,
+                              }}
+                              onClick={() => setStore("search", "case", (value) => !value)}
+                              aria-label="Match case"
+                              title="Match case"
+                            >
+                              Aa
+                            </button>
+                            <button
+                              type="button"
+                              class="flex h-8 min-w-8 items-center justify-center rounded-md border px-2 text-[11px] font-medium"
+                              classList={{
+                                "border-border-weak-base bg-surface-panel text-text-strong": store.search.word,
+                                "border-transparent text-text-weak hover:border-border-weak-base hover:bg-surface-panel":
+                                  !store.search.word,
+                              }}
+                              onClick={() => setStore("search", "word", (value) => !value)}
+                              aria-label="Match whole word"
+                              title="Match whole word"
+                            >
+                              ab
+                            </button>
+                            <button
+                              type="button"
+                              class="flex h-8 min-w-8 items-center justify-center rounded-md border px-2 text-[11px] font-medium"
+                              classList={{
+                                "border-border-weak-base bg-surface-panel text-text-strong": !store.search.fixed,
+                                "border-transparent text-text-weak hover:border-border-weak-base hover:bg-surface-panel":
+                                  store.search.fixed,
+                              }}
+                              onClick={() => setStore("search", "fixed", (value) => !value)}
+                              aria-label="Use regex"
+                              title="Use regex"
+                            >
+                              .*
+                            </button>
+                            <Show when={store.search.q.trim()}>
                               <IconButton
                                 icon="close-small"
                                 variant="ghost"
-                                class="mt-1 h-8 w-8 shrink-0 rounded-md"
-                                onClick={() => setQuery("")}
+                                class="h-8 w-8 shrink-0 rounded-md"
+                                onClick={() => {
+                                  setStore("search", "q", "")
+                                  setStore("search", "raw", "")
+                                }}
                                 aria-label={language.t("dialog.server.default.clear")}
                               />
                             </Show>
                           </div>
                         </div>
-                        <FileTree
-                          path=""
-                          class="pb-3"
-                          allowed={filtered()}
-                          modified={diffFiles()}
-                          kinds={kinds()}
-                          onFileClick={(node) => pick(node.path)}
-                        />
+                        <div class="mt-2 grid gap-2">
+                          <TextField
+                            label="files to include"
+                            hideLabel
+                            value={store.search.include}
+                            onChange={(value) => setStore("search", "include", value)}
+                            placeholder="files to include"
+                            spellcheck={false}
+                            autocorrect="off"
+                            autocomplete="off"
+                            autocapitalize="off"
+                            variant="ghost"
+                            class="min-h-8 text-12-regular"
+                          />
+                          <TextField
+                            label="files to exclude"
+                            hideLabel
+                            value={store.search.exclude}
+                            onChange={(value) => setStore("search", "exclude", value)}
+                            placeholder="files to exclude"
+                            spellcheck={false}
+                            autocorrect="off"
+                            autocomplete="off"
+                            autocapitalize="off"
+                            variant="ghost"
+                            class="min-h-8 text-12-regular"
+                          />
+                        </div>
+                        <Show when={text()}>
+                          <div class="mt-2 flex items-center justify-between gap-2 text-[11px] text-text-weak">
+                            <div>
+                              {total() >= 200 ? `${total()}+` : total()} results in {files()} file
+                              {files() === 1 ? "" : "s"}
+                            </div>
+                            <Show when={store.search.loading}>
+                              <div>
+                                {language.t("common.loading")}
+                                {language.t("common.loading.ellipsis")}
+                              </div>
+                            </Show>
+                          </div>
+                        </Show>
+                        <Show when={store.search.err}>
+                          {(err) => <div class="mt-2 text-[11px] text-text-danger-base">{err()}</div>}
+                        </Show>
                       </div>
-                    </Match>
-                  </Switch>
+
+                      <Switch>
+                        <Match when={text() && store.search.loading && total() === 0}>
+                          <div class="px-2 py-2 text-12-regular text-text-weak">
+                            {language.t("common.loading")}
+                            {language.t("common.loading.ellipsis")}
+                          </div>
+                        </Match>
+                        <Match when={text() && total() === 0}>{empty(language.t("palette.empty"))}</Match>
+                        <Match when={text()}>
+                          <div class="min-h-0 flex-1 overflow-auto pb-3">
+                            <div class="flex flex-col gap-2">
+                              <For each={grouped()}>
+                                {(item) => (
+                                  <div class="overflow-hidden rounded-md border border-border-weak-base bg-surface-panel">
+                                    <button
+                                      type="button"
+                                      class="flex w-full items-center justify-between gap-3 px-2 py-2 text-left hover:bg-surface-raised-base-hover"
+                                      onClick={() => toggle(item.path)}
+                                    >
+                                      <div class="flex min-w-0 items-center gap-2">
+                                        <Icon
+                                          name={shown(item.path) ? "chevron-down" : "chevron-right"}
+                                          size="small"
+                                          class="shrink-0 text-icon-weak"
+                                        />
+                                        <FileIcon node={{ path: item.path, type: "file" }} class="size-4 shrink-0" />
+                                        <div class="min-w-0 flex items-baseline gap-1.5">
+                                          <div class="shrink-0 text-12-medium text-text-strong">
+                                            {getFilename(item.path)}
+                                          </div>
+                                          <div class="min-w-0 truncate text-[11px] text-text-weak">
+                                            {where(item.path)}
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <span class="rounded-full bg-background-base px-2 py-0.5 text-[10px] font-medium text-text-weak">
+                                        {item.hits.length}
+                                      </span>
+                                    </button>
+                                    <Show when={shown(item.path)}>
+                                      <div class="border-t border-border-weak-base px-1 py-1.5">
+                                        <For each={item.hits}>
+                                          {(hit) => (
+                                            <button
+                                              type="button"
+                                              class="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-surface-raised-base-hover"
+                                              onClick={() => openHit(item.path, hit.num, hit.end)}
+                                            >
+                                              <div class="w-12 shrink-0 pt-0.5 text-right text-[10px] text-text-weak">
+                                                {hit.num === hit.end ? hit.num : `${hit.num}-${hit.end}`}
+                                              </div>
+                                              <div
+                                                class="min-w-0 flex-1 overflow-hidden font-mono text-[11px] text-text-weak"
+                                                classList={{
+                                                  "whitespace-nowrap": hit.num === hit.end,
+                                                  "whitespace-pre-wrap break-words": hit.num !== hit.end,
+                                                }}
+                                              >
+                                                <For each={parts(hit.line, hit.subs)}>
+                                                  {(part) => (
+                                                    <span
+                                                      style={
+                                                        part.hit
+                                                          ? {
+                                                              "background-color":
+                                                                "rgb(from var(--surface-warning-base) r g b / 0.24)",
+                                                              "box-shadow":
+                                                                "inset 0 -1px 0 0 var(--surface-warning-strong)",
+                                                              "border-radius": "3px",
+                                                            }
+                                                          : undefined
+                                                      }
+                                                    >
+                                                      {part.text}
+                                                    </span>
+                                                  )}
+                                                </For>
+                                              </div>
+                                            </button>
+                                          )}
+                                        </For>
+                                      </div>
+                                    </Show>
+                                  </div>
+                                )}
+                              </For>
+                            </div>
+                          </div>
+                        </Match>
+                        <Match when={true}>
+                          <FileTree
+                            path=""
+                            class="pb-3"
+                            modified={diffFiles()}
+                            kinds={kinds()}
+                            onFileClick={(node) => pick(node.path)}
+                          />
+                        </Match>
+                      </Switch>
+                    </div>
+                  </Show>
                 </Tabs.Content>
               </Tabs>
             </div>

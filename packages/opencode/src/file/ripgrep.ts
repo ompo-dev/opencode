@@ -332,20 +332,139 @@ export namespace Ripgrep {
     return lines.join("\n")
   }
 
+  function esc(text: string) {
+    return text.replace(/[|\\{}()[\]^$+*?.]/g, "\\$&")
+  }
+
+  function split(text: string) {
+    const rows = text.replace(/\r\n?/g, "\n").split("\n")
+    while (rows[0] !== undefined && !rows[0].trim()) rows.shift()
+    while (rows[rows.length - 1] !== undefined && !rows[rows.length - 1]?.trim()) rows.pop()
+    return rows
+  }
+
+  function same(a: string, b: string, cs?: boolean) {
+    if (cs) return a.trim() === b.trim()
+    return a.trim().toLowerCase() === b.trim().toLowerCase()
+  }
+
+  function pat(text: string, fixed?: boolean) {
+    const raw = text.replace(/\r\n?/g, "\n")
+    if (!raw.includes("\n")) {
+      return {
+        text,
+        fixed,
+        multi: false,
+      }
+    }
+
+    return {
+      text: fixed === false ? raw.replace(/\n/g, String.raw`\r?\n`) : raw.split("\n").map(esc).join(String.raw`\r?\n`),
+      fixed: false,
+      multi: true,
+    }
+  }
+
+  async function block(input: {
+    cwd: string
+    pattern: string
+    glob?: string[]
+    include?: string[]
+    exclude?: string[]
+    limit?: number
+    follow?: boolean
+    fixed?: boolean
+    case?: boolean
+    word?: boolean
+  }) {
+    const rows = split(input.pattern)
+    const pick = rows
+      .map((text, i) => ({
+        text: text.trim(),
+        i,
+      }))
+      .filter((item) => item.text)
+      .sort((a, b) => b.text.length - a.text.length)[0]
+
+    if (!pick) return [] as z.infer<typeof Match.shape.data>[]
+
+    const hits = await search({
+      ...input,
+      pattern: pick.text,
+      word: false,
+    })
+    if (hits.length === 0) return [] as z.infer<typeof Match.shape.data>[]
+
+    const out: z.infer<typeof Match.shape.data>[] = []
+    const files = [...new Set(hits.map((item) => item.path.text))]
+
+    for (const file of files) {
+      const content = await Filesystem.readText(path.join(input.cwd, file)).catch(() => "")
+      if (!content) continue
+
+      const lines = content.replace(/\r\n?/g, "\n").split("\n")
+      const list = hits.filter((item) => item.path.text === file)
+
+      for (const item of list) {
+        const start = item.line_number - pick.i
+        if (start < 1) continue
+
+        const match = lines.slice(start - 1, start - 1 + rows.length)
+        if (match.length !== rows.length) continue
+        if (!rows.every((row, i) => same(match[i] ?? "", row, input.case === true))) continue
+
+        const text = match.join("\n")
+        out.push({
+          path: { text: file },
+          lines: { text },
+          line_number: start,
+          absolute_offset: 0,
+          submatches: [
+            {
+              match: { text },
+              start: 0,
+              end: text.length,
+            },
+          ],
+        })
+        if (out.length >= (input.limit ?? 200)) return out
+      }
+    }
+
+    return out
+  }
+
   export async function search(input: {
     cwd: string
     pattern: string
     glob?: string[]
+    include?: string[]
+    exclude?: string[]
     limit?: number
     follow?: boolean
     fixed?: boolean
+    case?: boolean
+    word?: boolean
   }) {
+    if (input.fixed && input.pattern.includes("\n")) return block(input)
+
+    const pattern = pat(input.pattern, input.fixed)
     const args = [`${await filepath()}`, "--json", "--hidden", "--glob=!.git/*"]
     if (input.follow) args.push("--follow")
-    if (input.fixed) args.push("--fixed-strings")
+    if (pattern.multi) args.push("--multiline", "--multiline-dotall")
+    if (pattern.fixed) args.push("--fixed-strings")
+    if (input.case === false) args.push("--ignore-case")
+    if (input.case === true) args.push("--case-sensitive")
+    if (input.word && !pattern.multi) args.push("--word-regexp")
 
-    if (input.glob) {
-      for (const g of input.glob) {
+    const glob = [
+      ...(input.glob ?? []),
+      ...(input.include ?? []),
+      ...(input.exclude ?? []).map((item) => (item.startsWith("!") ? item : `!${item}`)),
+    ]
+
+    if (glob.length > 0) {
+      for (const g of glob) {
         args.push(`--glob=${g}`)
       }
     }
@@ -355,7 +474,7 @@ export namespace Ripgrep {
     }
 
     args.push("--")
-    args.push(input.pattern)
+    args.push(pattern.text)
 
     const result = await Process.text(args, {
       cwd: input.cwd,

@@ -1,6 +1,6 @@
-import { Compartment, EditorState, Prec } from "@codemirror/state"
+import { Compartment, EditorState, Prec, RangeSetBuilder, StateEffect, StateField } from "@codemirror/state"
 import { lintGutter, linter } from "@codemirror/lint"
-import { EditorView, keymap } from "@codemirror/view"
+import { Decoration, EditorView, keymap } from "@codemirror/view"
 import {
   HighlightStyle,
   LanguageDescription,
@@ -14,6 +14,7 @@ import { languages } from "@codemirror/language-data"
 import { tags } from "@lezer/highlight"
 import { basicSetup } from "codemirror"
 import { createEffect, onCleanup, onMount } from "solid-js"
+import type { SelectedLineRange } from "@/context/file"
 
 const style = HighlightStyle.define([
   { tag: tags.comment, color: "var(--syntax-comment)" },
@@ -89,6 +90,13 @@ const theme = EditorView.theme({
   ".cm-activeLine, .cm-activeLineGutter": {
     "background-color": "transparent",
   },
+  ".cm-session-selected-line": {
+    "background-color": "var(--diffs-bg-selection)",
+    "box-shadow": "inset 2px 0 0 var(--diffs-selection-border)",
+  },
+  ".cm-session-search-flash-line": {
+    animation: "session-search-line-flash 720ms ease-out",
+  },
   ".cm-cursor, .cm-dropCursor": {
     "border-left-color": "var(--text-base)",
   },
@@ -127,6 +135,39 @@ const theme = EditorView.theme({
   ".cm-lintPoint-error": {
     color: "var(--icon-critical-base)",
   },
+})
+
+const select = StateEffect.define<{
+  range: SelectedLineRange | null
+  flash: boolean
+}>()
+
+function marks(state: EditorState, range: SelectedLineRange | null, flash: boolean) {
+  if (!range) return Decoration.none
+
+  const start = Math.max(1, Math.min(range.start, range.end, state.doc.lines))
+  const end = Math.max(start, Math.min(Math.max(range.start, range.end), state.doc.lines))
+  const build = new RangeSetBuilder<Decoration>()
+  const name = flash ? "cm-session-selected-line cm-session-search-flash-line" : "cm-session-selected-line"
+
+  for (let line = start; line <= end; line += 1) {
+    build.add(state.doc.line(line).from, state.doc.line(line).from, Decoration.line({ attributes: { class: name } }))
+  }
+
+  return build.finish()
+}
+
+const selected = StateField.define({
+  create(state) {
+    return marks(state, null, false)
+  },
+  update(value, tr) {
+    for (const effect of tr.effects) {
+      if (effect.is(select)) return marks(tr.state, effect.value.range, effect.value.flash)
+    }
+    return value.map(tr.changes)
+  },
+  provide: (field) => EditorView.decorations.from(field),
 })
 
 const syntax = linter(
@@ -201,6 +242,8 @@ export function CodeEditor(props: {
   path: string
   value: string
   disabled?: boolean
+  selectedLines?: SelectedLineRange | null
+  flash?: boolean
   onInput: (value: string) => void
   onSave: VoidFunction
 }) {
@@ -225,6 +268,7 @@ export function CodeEditor(props: {
           syntaxHighlighting(style),
           lintGutter(),
           syntax,
+          selected,
           lang.of([]),
           edit.of(EditorView.editable.of(!props.disabled)),
           EditorView.contentAttributes.of({
@@ -275,6 +319,34 @@ export function CodeEditor(props: {
       },
     })
     mute = false
+  })
+
+  let last = ""
+
+  createEffect(() => {
+    const range = props.selectedLines ?? null
+    const flash = !!props.flash
+    if (!view) return
+
+    view.dispatch({
+      effects: select.of({ range, flash }),
+    })
+
+    if (!range) {
+      last = ""
+      return
+    }
+
+    const key = `${range.start}:${range.end}`
+    if (key === last) return
+    last = key
+
+    const line = Math.max(1, Math.min(Math.min(range.start, range.end), view.state.doc.lines))
+    view.dispatch({
+      effects: EditorView.scrollIntoView(view.state.doc.line(line).from, {
+        y: "center",
+      }),
+    })
   })
 
   createEffect(() => {

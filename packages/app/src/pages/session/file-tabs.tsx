@@ -296,7 +296,11 @@ export function FileTabContent(props: { tab: string }) {
     openedComment: null as string | null,
     commenting: null as SelectedLineRange | null,
     selected: null as SelectedLineRange | null,
+    flash: false,
   })
+
+  let flash: ReturnType<typeof setTimeout> | undefined
+  let last = ""
 
   const syncSelected = (range: SelectedLineRange | null) => {
     const p = path()
@@ -395,6 +399,33 @@ export function FileTabContent(props: { tab: string }) {
     requestAnimationFrame(() => comments.clearFocus())
   })
 
+  createEffect(() => {
+    const active = activeFileTab() === props.tab
+    const range = selectedLines()
+    const key = range
+      ? `${range.start}:${range.end}:${range.side ?? ""}:${range.endSide ?? ""}`
+      : ""
+
+    if (!range) {
+      last = ""
+      setNote("flash", false)
+      return
+    }
+
+    if (!active || note.selected || note.commenting) {
+      last = key
+      return
+    }
+
+    if (key === last) return
+    last = key
+
+    if (flash) clearTimeout(flash)
+    setNote("flash", false)
+    requestAnimationFrame(() => setNote("flash", true))
+    flash = setTimeout(() => setNote("flash", false), 900)
+  })
+
   const cancelCommenting = () => {
     const p = path()
     if (p) file.setSelectedLines(p, null)
@@ -417,8 +448,12 @@ export function FileTabContent(props: { tab: string }) {
     scrollSync.queueRestore()
   })
 
+  onCleanup(() => {
+    if (flash) clearTimeout(flash)
+  })
+
   const renderFile = (source: string) => (
-    <div class="relative overflow-hidden pb-40">
+    <div class="relative overflow-hidden pb-40" classList={{ "session-search-flash": note.flash }}>
       <Dynamic
         component={fileComponent}
         mode="text"
@@ -485,6 +520,8 @@ export function FileTabContent(props: { tab: string }) {
         <CodeEditor
           path={path() ?? ""}
           value={value()}
+          selectedLines={activeSelection()}
+          flash={note.flash}
           onInput={(next) => {
             const p = path()
             if (!p) return

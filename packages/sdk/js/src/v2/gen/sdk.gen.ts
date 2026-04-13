@@ -2933,6 +2933,11 @@ export class Find extends HeyApiClient {
       workspace?: string
       pattern: string
       fixed?: boolean
+      case?: boolean
+      word?: boolean
+      include?: string
+      exclude?: string
+      limit?: number
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2945,6 +2950,11 @@ export class Find extends HeyApiClient {
             { in: "query", key: "workspace" },
             { in: "query", key: "pattern" },
             { in: "query", key: "fixed" },
+            { in: "query", key: "case" },
+            { in: "query", key: "word" },
+            { in: "query", key: "include" },
+            { in: "query", key: "exclude" },
+            { in: "query", key: "limit" },
           ],
         },
       ],
