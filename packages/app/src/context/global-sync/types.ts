@@ -2,6 +2,7 @@ import type {
   Agent,
   Command,
   Config,
+  Kanban,
   LspStatus,
   McpStatus,
   Message,
@@ -66,6 +67,7 @@ export type State = {
   lsp_ready: boolean
   lsp: LspStatus[]
   vcs: VcsInfo | undefined
+  kanban: Kanban | undefined
   limit: number
   message: {
     [sessionID: string]: Message[]

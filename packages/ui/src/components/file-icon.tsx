@@ -34,6 +34,9 @@ export const FileIcon: Component<FileIconProps> = (props) => {
   )
 }
 
+export const fileIconHref = (path: string, type: "directory" | "file", expanded = false) =>
+  `${sprite}#${chooseIconName(path, type, expanded)}`
+
 type IconMaps = {
   fileNames: Record<string, IconName>
   fileExtensions: Record<string, IconName>

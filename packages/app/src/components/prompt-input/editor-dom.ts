@@ -59,9 +59,7 @@ export function setCursorPosition(parent: HTMLElement, position: number) {
   while (node) {
     const length = getNodeLength(node)
     const isText = node.nodeType === Node.TEXT_NODE
-    const isPill =
-      node.nodeType === Node.ELEMENT_NODE &&
-      ((node as HTMLElement).dataset.type === "file" || (node as HTMLElement).dataset.type === "agent")
+    const isPill = node.nodeType === Node.ELEMENT_NODE && !!(node as HTMLElement).dataset.type
     const isBreak = node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).tagName === "BR"
 
     if (isText && remaining <= length) {
@@ -124,9 +122,7 @@ export function setRangeEdge(parent: HTMLElement, range: Range, edge: "start" | 
   for (const node of nodes) {
     const length = getNodeLength(node)
     const isText = node.nodeType === Node.TEXT_NODE
-    const isPill =
-      node.nodeType === Node.ELEMENT_NODE &&
-      ((node as HTMLElement).dataset.type === "file" || (node as HTMLElement).dataset.type === "agent")
+    const isPill = node.nodeType === Node.ELEMENT_NODE && !!(node as HTMLElement).dataset.type
     const isBreak = node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).tagName === "BR"
 
     if (isText && remaining <= length) {

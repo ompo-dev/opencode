@@ -28,6 +28,7 @@ import { ConfigRoutes } from "./routes/config"
 import { ExperimentalRoutes } from "./routes/experimental"
 import { ProviderRoutes } from "./routes/provider"
 import { EventRoutes } from "./routes/event"
+import { KanbanRoutes } from "./routes/kanban"
 import { errorHandler } from "./middleware"
 import { getMimeType } from "hono/utils/mime"
 import { OutlineRoutes } from "@opencode-ai/outline-server"
@@ -56,6 +57,7 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, app: Hono = new Hono()
     .route("/permission", PermissionRoutes())
     .route("/question", QuestionRoutes())
     .route("/provider", ProviderRoutes())
+    .route("/kanban", KanbanRoutes())
     .route(
       "/outline",
       OutlineRoutes(() => ({

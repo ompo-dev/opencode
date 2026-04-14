@@ -1,0 +1,13 @@
+Use this tool to manage the kanban board for either the current project or the shared global board.
+
+You can:
+- create columns
+- rename or recolor columns
+- move columns
+- delete columns
+- create cards
+- edit cards, including title, description, colors, and tags
+- move cards between columns
+- delete cards
+
+Prefer exact existing column and card names when referring to items. If a name is ambiguous, inspect the current board state first and disambiguate in the next call.

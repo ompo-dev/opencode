@@ -1,6 +1,7 @@
 import { Binary } from "@opencode-ai/util/binary"
 import { produce, reconcile, type SetStoreFunction, type Store } from "solid-js/store"
 import type {
+  Kanban,
   Message,
   Part,
   PermissionRequest,
@@ -22,10 +23,16 @@ export function applyGlobalEvent(input: {
   event: { type: string; properties?: unknown }
   project: Project[]
   setGlobalProject: (next: Project[] | ((draft: Project[]) => void)) => void
+  setGlobalKanban: (next: Kanban) => void
   refresh: () => void
 }) {
   if (input.event.type === "global.disposed" || input.event.type === "server.connected") {
     input.refresh()
+    return
+  }
+
+  if (input.event.type === "kanban.updated") {
+    input.setGlobalKanban(input.event.properties as Kanban)
     return
   }
 
@@ -170,6 +177,10 @@ export function applyDirectoryEvent(input: {
       const props = event.properties as { sessionID: string; todos: Todo[] }
       input.setStore("todo", props.sessionID, reconcile(props.todos, { key: "id" }))
       input.setSessionTodo?.(props.sessionID, props.todos)
+      break
+    }
+    case "kanban.updated": {
+      input.setStore("kanban", reconcile(event.properties as Kanban))
       break
     }
     case "session.status": {

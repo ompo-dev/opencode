@@ -11,6 +11,25 @@ import { createClient } from "@hey-api/openapi-ts"
 
 await $`bun dev generate > ${dir}/openapi.json`.cwd(path.resolve(dir, "../../opencode"))
 
+const openapi = (await Bun.file("./openapi.json").json()) as unknown
+
+const fix = (value: unknown): void => {
+  if (!value) return
+  if (Array.isArray(value)) {
+    value.forEach(fix)
+    return
+  }
+  if (typeof value !== "object") return
+  const row = value as Record<string, unknown>
+  if (row.$ref === "#/components/schemas/__schema0") {
+    row.$ref = "#/components/schemas/OutlineNode"
+  }
+  Object.values(row).forEach(fix)
+}
+
+fix(openapi)
+await Bun.write("./openapi.json", JSON.stringify(openapi, null, 2))
+
 await createClient({
   input: "./openapi.json",
   output: {

@@ -1,0 +1,45 @@
+$ bun --cwd packages/desktop tauri dev
+$ tauri dev
+     Running BeforeDevCommand (`bun run dev`)
+$ bun ./scripts/predev.ts
+$ bun run script/build.ts --single --baseline --skip-install --skip-embed-web-ui
+        Warn Waiting for your frontend dev server to start on http://localhost:1420/...
+$ vite
+     Running DevCommand (`cargo  run --no-default-features --color always --`)
+        Info Watching C:\Projects\Teste\opencode\packages\desktop\src-tauri for changes...
+[1m[92m   Compiling[0m opencode-desktop v0.0.0 (C:\Projects\Teste\opencode\packages\desktop\src-tauri)
+[1m[96m    Building[0m [=======================> ] 591/594: opencod…[1m[96m    Building[0m [=======================> ] 592/594: opencod…                                                            [1m[93mwarning[0m[1m[97m: struct `ServerConfig` is never constructed[0m
+  [1m[96m--> [0msrc\cli.rs:48:12
+   [1m[96m|[0m
+[1m[96m48[0m [1m[96m|[0m pub struct ServerConfig {
+   [1m[96m|[0m            [1m[93m^^^^^^^^^^^^[0m
+   [1m[96m|[0m
+   [1m[96m= [0m[1m[97mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+[1m[96m    Building[0m [=======================> ] 592/594: opencod…                                                            [1m[93mwarning[0m[1m[97m: struct `Config` is never constructed[0m
+  [1m[96m--> [0msrc\cli.rs:54:12
+   [1m[96m|[0m
+[1m[96m54[0m [1m[96m|[0m pub struct Config {
+   [1m[96m|[0m            [1m[93m^^^^^^[0m
+
+[1m[93mwarning[0m[1m[97m: function `get_config` is never used[0m
+  [1m[96m--> [0msrc\cli.rs:85:14
+   [1m[96m|[0m
+[1m[96m85[0m [1m[96m|[0m pub async fn get_config(app: &AppHandle) -> Option<Config> {
+   [1m[96m|[0m              [1m[93m^^^^^^^^^^[0m
+
+[1m[93mwarning[0m[1m[97m: constant `TAIL_LINES` is never used[0m
+ [1m[96m--> [0msrc\logging.rs:8:7
+  [1m[96m|[0m
+[1m[96m8[0m [1m[96m|[0m const TAIL_LINES: usize = 1000;
+  [1m[96m|[0m       [1m[93m^^^^^^^^^^[0m
+
+[1m[93mwarning[0m[1m[97m: function `tail` is never used[0m
+  [1m[96m--> [0msrc\logging.rs:45:8
+   [1m[96m|[0m
+[1m[96m45[0m [1m[96m|[0m pub fn tail() -> String {
+   [1m[96m|[0m        [1m[93m^^^^[0m
+
+[1m[96m    Building[0m [=======================> ] 592/594: opencod…                                                            [1m[93mwarning[0m: `opencode-desktop` (lib) generated 5 warnings
+[1m[96m    Building[0m [=======================> ] 593/594: opencod…                                                            [1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 43.31s
+[1m[92m     Running[0m `target\debug\opencode-desktop.exe`

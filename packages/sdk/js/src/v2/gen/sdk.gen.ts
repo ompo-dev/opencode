@@ -19,6 +19,8 @@ import type {
   ConfigProvidersResponses,
   ConfigUpdateErrors,
   ConfigUpdateResponses,
+  DeleteOutlineCollectionCollectionIdResponses,
+  DeleteOutlineDocumentDocumentIdResponses,
   EventSubscribeResponses,
   EventTuiCommandExecute,
   EventTuiPromptAppend,
@@ -50,10 +52,15 @@ import type {
   GlobalDisposeResponses,
   GlobalEventResponses,
   GlobalHealthResponses,
+  GlobalKanbanGetResponses,
+  GlobalKanbanUpdateResponses,
   GlobalSyncEventSubscribeResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
   InstanceDisposeResponses,
+  KanbanGetResponses,
+  KanbanOperation,
+  KanbanUpdateResponses,
   LspStatusResponses,
   McpAddErrors,
   McpAddResponses,
@@ -70,12 +77,19 @@ import type {
   McpLocalConfig,
   McpRemoteConfig,
   McpStatusResponses,
+  OutlineDocumentCreate,
+  OutlineDocumentGetResponses,
+  OutlineDocumentUpdate,
+  OutlineSearchResponses,
+  OutlineWorkspaceResponses,
   OutputFormat,
   Part as Part2,
   PartDeleteErrors,
   PartDeleteResponses,
   PartUpdateErrors,
   PartUpdateResponses,
+  PatchOutlineCollectionCollectionIdResponses,
+  PatchOutlineDocumentDocumentIdResponses,
   PathGetResponses,
   PermissionListResponses,
   PermissionReplyErrors,
@@ -83,6 +97,11 @@ import type {
   PermissionRespondErrors,
   PermissionRespondResponses,
   PermissionRuleset,
+  PostOutlineCollectionCollectionIdArchiveResponses,
+  PostOutlineCollectionResponses,
+  PostOutlineDocumentDocumentIdArchiveResponses,
+  PostOutlineDocumentDocumentIdMoveResponses,
+  PostOutlineDocumentResponses,
   ProjectCurrentResponses,
   ProjectInitGitResponses,
   ProjectListResponses,
@@ -181,8 +200,8 @@ import type {
   TuiSubmitPromptResponses,
   VcsAmendResponses,
   VcsCommitResponses,
-  VcsDiscardResponses,
   VcsDiffResponses,
+  VcsDiscardResponses,
   VcsGetResponses,
   VcsHistoryResponses,
   VcsPushResponses,
@@ -243,6 +262,44 @@ class HeyApiRegistry<T> {
 
   set(value: T, key?: string): void {
     this.instances.set(key ?? this.defaultKey, value)
+  }
+}
+
+export class Kanban extends HeyApiClient {
+  /**
+   * Get global kanban board
+   *
+   * Retrieve the global kanban board shared across projects.
+   */
+  public get<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalKanbanGetResponses, unknown, ThrowOnError>({
+      url: "/global/kanban",
+      ...options,
+    })
+  }
+
+  /**
+   * Update global kanban board
+   *
+   * Create, edit, move, or delete kanban columns and cards on the global board.
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters?: {
+      operations?: Array<KanbanOperation>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "operations" }] }])
+    return (options?.client ?? this.client).patch<GlobalKanbanUpdateResponses, unknown, ThrowOnError>({
+      url: "/global/kanban",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
   }
 }
 
@@ -357,6 +414,11 @@ export class Global extends HeyApiClient {
         ...params.headers,
       },
     })
+  }
+
+  private _kanban?: Kanban
+  get kanban(): Kanban {
+    return (this._kanban ??= new Kanban({ client: this.client }))
   }
 
   private _syncEvent?: SyncEvent
@@ -2921,6 +2983,176 @@ export class Provider extends HeyApiClient {
   }
 }
 
+export class Kanban2 extends HeyApiClient {
+  /**
+   * Get kanban board
+   *
+   * Retrieve the kanban board for the current project.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<KanbanGetResponses, unknown, ThrowOnError>({
+      url: "/kanban",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Update kanban board
+   *
+   * Create, edit, move, or delete kanban columns and cards for the current project.
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      operations?: Array<KanbanOperation>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "operations" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<KanbanUpdateResponses, unknown, ThrowOnError>({
+      url: "/kanban",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Document extends HeyApiClient {
+  /**
+   * Get Outline document
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      documentID: string
+      directory?: string
+      workspace?: string
+      scope: "global" | "project"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "documentID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "scope" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<OutlineDocumentGetResponses, unknown, ThrowOnError>({
+      url: "/outline/document/{documentID}",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Outline extends HeyApiClient {
+  /**
+   * Get Outline workspace snapshot
+   */
+  public workspace<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<OutlineWorkspaceResponses, unknown, ThrowOnError>({
+      url: "/outline/workspace",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Search Outline documents
+   */
+  public search<ThrowOnError extends boolean = false>(
+    parameters: {
+      directory?: string
+      workspace?: string
+      scope: "global" | "project"
+      query?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "scope" },
+            { in: "query", key: "query" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<OutlineSearchResponses, unknown, ThrowOnError>({
+      url: "/outline/search",
+      ...options,
+      ...params,
+    })
+  }
+
+  private _document?: Document
+  get document(): Document {
+    return (this._document ??= new Document({ client: this.client }))
+  }
+}
+
 export class Find extends HeyApiClient {
   /**
    * Find text
@@ -3112,7 +3344,7 @@ export class File extends HeyApiClient {
       directory?: string
       workspace?: string
       path: string
-      content: string
+      content?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -4232,10 +4464,10 @@ export class Vcs extends HeyApiClient {
    * Create a git commit from the current staged changes.
    */
   public commit<ThrowOnError extends boolean = false>(
-    parameters: {
+    parameters?: {
       directory?: string
       workspace?: string
-      message: string
+      message?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -4269,10 +4501,10 @@ export class Vcs extends HeyApiClient {
    * Amend the latest git commit with a new message.
    */
   public amend<ThrowOnError extends boolean = false>(
-    parameters: {
+    parameters?: {
       directory?: string
       workspace?: string
-      message: string
+      message?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -4327,11 +4559,6 @@ export class Vcs extends HeyApiClient {
       url: "/vcs/push",
       ...options,
       ...params,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-        ...params.headers,
-      },
     })
   }
 
@@ -4362,11 +4589,6 @@ export class Vcs extends HeyApiClient {
       url: "/vcs/sync",
       ...options,
       ...params,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-        ...params.headers,
-      },
     })
   }
 
@@ -4397,11 +4619,6 @@ export class Vcs extends HeyApiClient {
       url: "/vcs/suggest",
       ...options,
       ...params,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-        ...params.headers,
-      },
     })
   }
 }
@@ -4510,6 +4727,322 @@ export class OpencodeClient extends HeyApiClient {
     OpencodeClient.__registry.set(this, args?.key)
   }
 
+  public deleteOutlineDocumentDocumentId<ThrowOnError extends boolean = false>(
+    parameters: {
+      documentID: string
+      directory?: string
+      workspace?: string
+      scope: "global" | "project"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "documentID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "scope" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<DeleteOutlineDocumentDocumentIdResponses, unknown, ThrowOnError>({
+      url: "/outline/document/{documentID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  public patchOutlineDocumentDocumentId<ThrowOnError extends boolean = false>(
+    parameters: {
+      documentID: string
+      directory?: string
+      workspace?: string
+      outlineDocumentUpdate?: OutlineDocumentUpdate
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "documentID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "outlineDocumentUpdate", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<PatchOutlineDocumentDocumentIdResponses, unknown, ThrowOnError>({
+      url: "/outline/document/{documentID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public postOutlineCollection<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      scope?: "global" | "project"
+      title?: string
+      description?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "scope" },
+            { in: "body", key: "title" },
+            { in: "body", key: "description" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<PostOutlineCollectionResponses, unknown, ThrowOnError>({
+      url: "/outline/collection",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public deleteOutlineCollectionCollectionId<ThrowOnError extends boolean = false>(
+    parameters: {
+      collectionID: string
+      directory?: string
+      workspace?: string
+      scope: "global" | "project"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "collectionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "scope" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<DeleteOutlineCollectionCollectionIdResponses, unknown, ThrowOnError>(
+      {
+        url: "/outline/collection/{collectionID}",
+        ...options,
+        ...params,
+      },
+    )
+  }
+
+  public patchOutlineCollectionCollectionId<ThrowOnError extends boolean = false>(
+    parameters: {
+      collectionID: string
+      directory?: string
+      workspace?: string
+      scope?: "global" | "project"
+      title?: string
+      description?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "collectionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "scope" },
+            { in: "body", key: "title" },
+            { in: "body", key: "description" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<PatchOutlineCollectionCollectionIdResponses, unknown, ThrowOnError>({
+      url: "/outline/collection/{collectionID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public postOutlineCollectionCollectionIdArchive<ThrowOnError extends boolean = false>(
+    parameters: {
+      collectionID: string
+      directory?: string
+      workspace?: string
+      scope?: "global" | "project"
+      archived?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "collectionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "scope" },
+            { in: "body", key: "archived" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      PostOutlineCollectionCollectionIdArchiveResponses,
+      unknown,
+      ThrowOnError
+    >({
+      url: "/outline/collection/{collectionID}/archive",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public postOutlineDocument<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      outlineDocumentCreate?: OutlineDocumentCreate
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "outlineDocumentCreate", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<PostOutlineDocumentResponses, unknown, ThrowOnError>({
+      url: "/outline/document",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public postOutlineDocumentDocumentIdMove<ThrowOnError extends boolean = false>(
+    parameters: {
+      documentID: string
+      directory?: string
+      workspace?: string
+      scope?: "global" | "project"
+      collection_id?: string
+      parent_document_id?: string | null
+      index?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "documentID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "scope" },
+            { in: "body", key: "collection_id" },
+            { in: "body", key: "parent_document_id" },
+            { in: "body", key: "index" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<PostOutlineDocumentDocumentIdMoveResponses, unknown, ThrowOnError>({
+      url: "/outline/document/{documentID}/move",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public postOutlineDocumentDocumentIdArchive<ThrowOnError extends boolean = false>(
+    parameters: {
+      documentID: string
+      directory?: string
+      workspace?: string
+      scope?: "global" | "project"
+      archived?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "documentID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "scope" },
+            { in: "body", key: "archived" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<PostOutlineDocumentDocumentIdArchiveResponses, unknown, ThrowOnError>({
+      url: "/outline/document/{documentID}/archive",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
   private _global?: Global
   get global(): Global {
     return (this._global ??= new Global({ client: this.client }))
@@ -4578,6 +5111,16 @@ export class OpencodeClient extends HeyApiClient {
   private _provider?: Provider
   get provider(): Provider {
     return (this._provider ??= new Provider({ client: this.client }))
+  }
+
+  private _kanban?: Kanban2
+  get kanban(): Kanban2 {
+    return (this._kanban ??= new Kanban2({ client: this.client }))
+  }
+
+  private _outline?: Outline
+  get outline(): Outline {
+    return (this._outline ??= new Outline({ client: this.client }))
   }
 
   private _find?: Find

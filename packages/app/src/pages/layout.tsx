@@ -2208,19 +2208,34 @@ export default function Layout(props: ParentProps) {
                 when={workspacesEnabled()}
                 fallback={
                   <>
-                    <div class="shrink-0 py-4">
-                      <Button
-                        size="large"
-                        icon="new-session"
-                        class="w-full"
-                        onClick={() => {
-                          const dir = worktree()
-                          if (!dir) return
-                          navigateWithSidebarReset(`/${base64Encode(dir)}/session`)
-                        }}
-                      >
-                        {language.t("command.session.new")}
-                      </Button>
+                  <div class="shrink-0 py-4">
+                      <div class="flex gap-2">
+                        <Button
+                          size="large"
+                          icon="new-session"
+                          class="min-w-0 flex-1"
+                          onClick={() => {
+                            const dir = worktree()
+                            if (!dir) return
+                            navigateWithSidebarReset(`/${base64Encode(dir)}/session`)
+                          }}
+                        >
+                          {language.t("command.session.new")}
+                        </Button>
+                        <Button
+                          size="large"
+                          icon="checklist"
+                          variant="ghost"
+                          class="min-w-0 flex-1"
+                          onClick={() => {
+                            const dir = worktree()
+                            if (!dir) return
+                            navigateWithSidebarReset(`/${base64Encode(dir)}/board`)
+                          }}
+                        >
+                          {language.t("board.short")}
+                        </Button>
+                      </div>
                     </div>
                     <div class="flex-1 min-h-0">
                       <LocalWorkspace
@@ -2235,18 +2250,33 @@ export default function Layout(props: ParentProps) {
               >
                 <>
                   <div class="shrink-0 py-4">
-                    <Button
-                      size="large"
-                      icon="plus-small"
-                      class="w-full"
-                      onClick={() => {
-                        const item = project()
-                        if (!item) return
-                        createWorkspace(item)
-                      }}
-                    >
-                      {language.t("workspace.new")}
-                    </Button>
+                    <div class="flex gap-2">
+                      <Button
+                        size="large"
+                        icon="plus-small"
+                        class="min-w-0 flex-1"
+                        onClick={() => {
+                          const item = project()
+                          if (!item) return
+                          createWorkspace(item)
+                        }}
+                      >
+                        {language.t("workspace.new")}
+                      </Button>
+                      <Button
+                        size="large"
+                        icon="checklist"
+                        variant="ghost"
+                        class="min-w-0 flex-1"
+                        onClick={() => {
+                          const dir = worktree()
+                          if (!dir) return
+                          navigateWithSidebarReset(`/${base64Encode(dir)}/board`)
+                        }}
+                      >
+                        {language.t("board.short")}
+                      </Button>
+                    </div>
                   </div>
                   <div class="relative flex-1 min-h-0">
                     <DragDropProvider
@@ -2342,6 +2372,8 @@ export default function Layout(props: ParentProps) {
       openProjectKeybind={() => command.keybind("project.open")}
       onOpenProject={chooseProject}
       renderProjectOverlay={projectOverlay}
+      boardLabel={() => language.t("home.globalBoard")}
+      onOpenBoard={() => navigateWithSidebarReset("/board")}
       settingsLabel={() => language.t("sidebar.settings")}
       settingsKeybind={() => command.keybind("settings.open")}
       onOpenSettings={openSettings}

@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import type { Message, Part, PermissionRequest, Project, QuestionRequest, Session } from "@opencode-ai/sdk/v2/client"
+import type {
+  Kanban,
+  Message,
+  Part,
+  PermissionRequest,
+  Project,
+  QuestionRequest,
+  Session,
+} from "@opencode-ai/sdk/v2/client"
 import { createStore } from "solid-js/store"
 import type { State } from "./types"
 import { applyDirectoryEvent, applyGlobalEvent, cleanupDroppedSessionCaches } from "./event-reducer"
@@ -84,6 +92,37 @@ const baseState = (input: Partial<State> = {}) =>
     ...input,
   }) as State
 
+const board = (scope: Kanban["scope"] = "project") =>
+  ({
+    scope,
+    columns: [
+      {
+        id: "col_1",
+        name: "Backlog",
+        color: "blue",
+        position: 0,
+        cards: [
+          {
+            id: "crd_1",
+            columnID: "col_1",
+            title: "Task",
+            titleRefs: [],
+            color: "green",
+            descriptionRefs: [],
+            tags: [
+              {
+                id: "tag_1",
+                name: "feature",
+                color: "violet",
+              },
+            ],
+            position: 0,
+          },
+        ],
+      },
+    ],
+  }) as Kanban
+
 describe("applyGlobalEvent", () => {
   test("upserts project.updated in sorted position", () => {
     const project = [{ id: "a" }, { id: "c" }] as Project[]
@@ -94,6 +133,7 @@ describe("applyGlobalEvent", () => {
       refresh: () => {
         refreshCount += 1
       },
+      setGlobalKanban() {},
       setGlobalProject(next) {
         if (typeof next === "function") next(project)
       },
@@ -111,6 +151,7 @@ describe("applyGlobalEvent", () => {
       refresh: () => {
         refreshCount += 1
       },
+      setGlobalKanban() {},
       setGlobalProject() {},
     })
 
@@ -125,10 +166,27 @@ describe("applyGlobalEvent", () => {
       refresh: () => {
         refreshCount += 1
       },
+      setGlobalKanban() {},
       setGlobalProject() {},
     })
 
     expect(refreshCount).toBe(1)
+  })
+
+  test("updates global kanban state", () => {
+    let next: Kanban | undefined
+    applyGlobalEvent({
+      event: { type: "kanban.updated", properties: board("global") },
+      project: [],
+      refresh() {},
+      setGlobalKanban(value) {
+        next = value
+      },
+      setGlobalProject() {},
+    })
+
+    expect(next?.scope).toBe("global")
+    expect(next?.columns[0]?.cards[0]?.title).toBe("Task")
   })
 })
 
@@ -491,6 +549,21 @@ describe("applyDirectoryEvent", () => {
       loadLsp() {},
     })
     expect(store.question[sessionID]?.map((x) => x.id)).toEqual(["q_1", "q_3"])
+  })
+
+  test("updates kanban board in directory state", () => {
+    const [store, setStore] = createStore(baseState())
+    applyDirectoryEvent({
+      event: { type: "kanban.updated", properties: board() },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.kanban?.scope).toBe("project")
+    expect(store.kanban?.columns[0]?.name).toBe("Backlog")
   })
 
   test("updates vcs branch in store and cache", () => {

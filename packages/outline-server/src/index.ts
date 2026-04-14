@@ -19,22 +19,16 @@ const mark = z
   })
 
 const node: z.ZodType<OutlineNode> = z
-  .lazy(() =>
-    z.object({
-      type: z.string(),
-      text: z.string().optional(),
-      attrs: z.record(z.string(), attr).optional(),
-      marks: z.array(mark).optional(),
-      content: z.array(node).optional(),
-    }),
-  )
+  .object({
+    type: z.string(),
+    text: z.string().optional(),
+    attrs: z.record(z.string(), attr).optional(),
+    marks: z.array(mark).optional(),
+    content: z.array(z.lazy(() => node)).optional(),
+  })
   .meta({
     ref: "OutlineNode",
   })
-
-const body = node.default(outlineEmpty()).meta({
-  ref: "OutlineDocumentContent",
-})
 
 const collectionCreate = z.object({
   scope,
@@ -59,7 +53,7 @@ const documentCreate = z
     collection_id: z.string(),
     parent_document_id: z.string().optional(),
     title: z.string().optional(),
-    content: body.optional(),
+    content: node.optional(),
   })
   .meta({
     ref: "OutlineDocumentCreate",
@@ -69,7 +63,7 @@ const documentUpdate = z
   .object({
     scope,
     title: z.string().optional(),
-    content: body.optional(),
+    content: node.optional(),
   })
   .meta({
     ref: "OutlineDocumentUpdate",
@@ -94,7 +88,7 @@ const noteUpsert = z
     collection_id: z.string().optional(),
     parent_document_id: z.string().optional(),
     title: z.string().optional(),
-    content: body.optional(),
+    content: node.optional(),
   })
   .meta({
     ref: "OutlineNoteUpsert",

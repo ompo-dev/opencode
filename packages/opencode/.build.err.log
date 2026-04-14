@@ -1,0 +1,1 @@
+$ bun run script/build.ts --single --baseline --skip-install --skip-embed-web-ui

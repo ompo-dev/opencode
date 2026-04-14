@@ -2,6 +2,7 @@ import { OutlinePanel as Panel, type OutlinePanelApi } from "@opencode-ai/outlin
 import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
+import { mentions } from "@/utils/outline-mentions"
 
 export function OutlinePanel(props: {
   width: number
@@ -72,6 +73,23 @@ export function OutlinePanel(props: {
           scope: input.scope,
           query: input.query,
         },
+      }),
+    mentions: (query) =>
+      mentions({
+        query,
+        workspace: () => call("GET", "/outline/workspace"),
+        search: (scope, value) =>
+          call("GET", "/outline/search", {
+            query: {
+              scope,
+              query: value,
+            },
+          }),
+        paths: (value) =>
+          sdk.client.find.files({ query: value, dirs: "true", limit: value ? 8 : 6 }).then(
+            (x) => x.data ?? [],
+            () => [],
+          ),
       }),
   }
 

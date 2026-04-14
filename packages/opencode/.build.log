@@ -1,0 +1,34 @@
+opencode script {
+  "channel": "dev",
+  "version": "0.0.0-dev-202604132345",
+  "preview": true,
+  "release": false,
+  "team": [
+    "adamdotdevin",
+    "Brendonovich",
+    "fwang",
+    "Hona",
+    "iamdavidhill",
+    "jayair",
+    "jlongster",
+    "kitlangton",
+    "kommander",
+    "MrMushrooooom",
+    "nexxeln",
+    "R44VC0RP",
+    "rekram1-node",
+    "RhysSullivan",
+    "thdxr",
+    "actions-user",
+    "opencode",
+    "opencode-agent[bot]"
+  ]
+}
+Generated models-snapshot.js
+Loaded 13 migrations
+building opencode-windows-x64
+Running smoke test: dist/opencode-windows-x64/bin/opencode --version
+Smoke test passed: 0.0.0-dev-202604132345
+building opencode-windows-x64-baseline
+Running smoke test: dist/opencode-windows-x64-baseline/bin/opencode --version
+Smoke test passed: 0.0.0-dev-202604132345

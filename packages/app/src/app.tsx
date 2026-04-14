@@ -47,6 +47,8 @@ import { ErrorPage } from "./pages/error"
 import { useCheckServerHealth } from "./utils/server-health"
 
 const HomeRoute = lazy(() => import("@/pages/home"))
+const GlobalBoardRoute = lazy(() => import("@/pages/global-board"))
+const BoardRoute = lazy(() => import("@/pages/board"))
 const loadSession = () => import("@/pages/session")
 const Session = lazy(loadSession)
 const Loading = () => <div class="size-full" />
@@ -296,8 +298,10 @@ export function AppInterface(props: {
                 root={(routerProps) => <RouterRoot appChildren={props.children}>{routerProps.children}</RouterRoot>}
               >
                 <Route path="/" component={HomeRoute} />
+                <Route path="/board" component={GlobalBoardRoute} />
                 <Route path="/:dir" component={DirectoryLayout}>
                   <Route path="/" component={SessionIndexRoute} />
+                  <Route path="/board" component={BoardRoute} />
                   <Route path="/session/:id?" component={SessionRoute} />
                 </Route>
               </Dynamic>

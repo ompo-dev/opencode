@@ -1,8 +1,5 @@
 /// <reference path="./editorjs-checklist.d.ts" />
 
-import { Button } from "@opencode-ai/ui/button"
-import { Icon } from "@opencode-ai/ui/icon"
-import { IconButton } from "@opencode-ai/ui/icon-button"
 import { outlineEmpty, type OutlineMark, type OutlineNode } from "@opencode-ai/outline-core"
 import Checklist from "@editorjs/checklist"
 import Code from "@editorjs/code"
@@ -12,7 +9,20 @@ import Header from "@editorjs/header"
 import List from "@editorjs/list"
 import Quote from "@editorjs/quote"
 import Table from "@editorjs/table"
-import { For, onCleanup, onMount } from "solid-js"
+import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js"
+import { Portal } from "solid-js/web"
+import type { OutlineMention } from "./mentions"
+import {
+  mentionBackspace,
+  mentionHead,
+  mentionHTML,
+  mentionMeta,
+  MentionGlyph,
+  mentionNode,
+  mentionSpot,
+  type MentionSpot,
+  type MentionValue,
+} from "./mention-ui"
 import "./outline.css"
 
 type Attr = Record<string, string | number | boolean | null>
@@ -92,9 +102,54 @@ const acts = [
 const esc = (value: string) =>
   value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;")
 
+const pick = (attrs: OutlineMark["attrs"], label: string): MentionValue | undefined => {
+  const kind = typeof attrs?.kind === "string" ? attrs.kind : undefined
+  if (!kind) return
+  if (kind === "path" && typeof attrs?.path === "string") {
+    return {
+      kind,
+      label,
+      path: attrs.path,
+    }
+  }
+  if (
+    kind === "collection" &&
+    typeof attrs?.scope === "string" &&
+    typeof attrs?.title === "string" &&
+    typeof attrs?.collectionID === "string"
+  ) {
+    return {
+      kind,
+      label,
+      scope: attrs.scope as "global" | "project",
+      title: attrs.title,
+      collectionID: attrs.collectionID,
+    }
+  }
+  if (
+    kind === "note" &&
+    typeof attrs?.scope === "string" &&
+    typeof attrs?.title === "string" &&
+    typeof attrs?.documentID === "string"
+  ) {
+    return {
+      kind,
+      label,
+      scope: attrs.scope as "global" | "project",
+      title: attrs.title,
+      documentID: attrs.documentID,
+    }
+  }
+}
+
 const wrap = (value: string, marks?: OutlineMark[]) => {
   if (!marks || marks.length === 0) return esc(value)
   return marks.reduce((text, mark) => {
+    if (mark.type === "mention") {
+      const item = pick(mark.attrs, typeof mark.attrs?.label === "string" ? mark.attrs.label : value)
+      if (!item) return text
+      return mentionHTML(item)
+    }
     if (mark.type === "strong") return `<strong>${text}</strong>`
     if (mark.type === "em") return `<em>${text}</em>`
     if (mark.type === "strike") return `<s>${text}</s>`
@@ -241,6 +296,21 @@ const blocks = (node?: OutlineNode): OutputData["blocks"] => {
 }
 
 const mark = (item: HTMLElement): OutlineMark | undefined => {
+  const kind = item.dataset.mentionKind
+  if (kind) {
+    return {
+      type: "mention",
+      attrs: {
+        kind,
+        label: item.dataset.label || item.textContent || "",
+        ...(item.dataset.path ? { path: item.dataset.path } : {}),
+        ...(item.dataset.scope ? { scope: item.dataset.scope } : {}),
+        ...(item.dataset.documentId ? { documentID: item.dataset.documentId } : {}),
+        ...(item.dataset.collectionId ? { collectionID: item.dataset.collectionId } : {}),
+        ...(item.dataset.title ? { title: item.dataset.title } : {}),
+      },
+    }
+  }
   const tag = item.tagName.toLowerCase()
   if (tag === "b" || tag === "strong") return { type: "strong" }
   if (tag === "i" || tag === "em") return { type: "em" }
@@ -402,9 +472,84 @@ const node = (value?: OutputData): OutlineNode => {
   }
 }
 
-export function OutlineEditor(props: { value?: OutlineNode; onChange: (value: OutlineNode) => void }) {
+const size = (node: Node): number => {
+  if (node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).tagName === "BR") return 1
+  return (node.textContent ?? "").replace(/\u200B/g, "").length
+}
+
+const length = (node: Node): number => {
+  if (node.nodeType === Node.TEXT_NODE) return (node.textContent ?? "").replace(/\u200B/g, "").length
+  if (node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).tagName === "BR") return 1
+  let total = 0
+  for (const child of Array.from(node.childNodes)) {
+    total += length(child)
+  }
+  return total
+}
+
+const cursor = (root: HTMLElement) => {
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0) return 0
+  const range = selection.getRangeAt(0)
+  if (!root.contains(range.startContainer)) return 0
+  const next = range.cloneRange()
+  next.selectNodeContents(root)
+  next.setEnd(range.startContainer, range.startOffset)
+  return length(next.cloneContents())
+}
+
+const edge = (root: HTMLElement, range: Range, side: "start" | "end", offset: number) => {
+  let left = offset
+  for (const node of Array.from(root.childNodes)) {
+    const count = size(node)
+    const text = node.nodeType === Node.TEXT_NODE
+    if (text && left <= count) {
+      if (side === "start") range.setStart(node, left)
+      if (side === "end") range.setEnd(node, left)
+      return
+    }
+    if (left <= count) {
+      if (side === "start" && left === 0) range.setStartBefore(node)
+      if (side === "start" && left > 0) range.setStartAfter(node)
+      if (side === "end" && left === 0) range.setEndBefore(node)
+      if (side === "end" && left > 0) range.setEndAfter(node)
+      return
+    }
+    left -= count
+  }
+}
+
+const read = (node: Node): string => {
+  if (node.nodeType === Node.TEXT_NODE) return (node.textContent ?? "").replace(/\u200B/g, "")
+  if (!(node instanceof HTMLElement)) return ""
+  if (node.tagName === "BR") return "\n"
+  if (node.dataset.mentionKind) return node.dataset.label ?? node.textContent ?? ""
+  return Array.from(node.childNodes).map(read).join("")
+}
+
+const editable = (root: HTMLElement) => {
+  const selection = window.getSelection()
+  if (!selection?.anchorNode) return
+  const node = selection.anchorNode instanceof HTMLElement ? selection.anchorNode : selection.anchorNode.parentElement
+  const next = node?.closest<HTMLElement>("[contenteditable='true']")
+  if (!next || !root.contains(next)) return
+  return next
+}
+
+export function OutlineEditor(props: {
+  value?: OutlineNode
+  mentions?: (query: string) => Promise<OutlineMention[]>
+  onChange: (value: OutlineNode) => void
+}) {
+  let box: HTMLDivElement | undefined
   let el: HTMLDivElement | undefined
   let view: EditorJS | undefined
+  let task = 0
+  const [open, setOpen] = createSignal(false)
+  const [items, setItems] = createSignal<OutlineMention[]>([])
+  const [active, setActive] = createSignal("")
+  const [spot, setSpot] = createSignal<MentionSpot>()
+  const list = createMemo(() => items().slice(0, 10))
 
   const run = (fn: (ed: EditorJS) => void) => {
     const ed = view
@@ -433,6 +578,92 @@ export function OutlineEditor(props: { value?: OutlineNode; onChange: (value: Ou
       .then(() => {
         ed.caret.setToFirstBlock("start")
       })
+  }
+
+  const emit = () => {
+    const editor = view
+    if (!editor) return
+    void editor.isReady
+      .then(() => editor.save())
+      .then((data) => props.onChange(node(data)))
+      .catch(() => {})
+  }
+
+  const close = () => {
+    task += 1
+    setOpen(false)
+    setItems([])
+    setActive("")
+    setSpot(undefined)
+  }
+
+  const place = () => {
+    if (!el || !box) return
+    const root = editable(el)
+    if (!root) return
+    return mentionSpot(root, box)
+  }
+
+  const load = (query: string) => {
+    if (!props.mentions) {
+      close()
+      return
+    }
+    const id = ++task
+    return props.mentions(query.trim()).then((items) => {
+      if (id !== task) return
+      setItems(items)
+      setActive(items[0]?.key ?? "")
+      setOpen(items.length > 0)
+      setSpot(items[0] ? place() : undefined)
+    })
+  }
+
+  const sync = () => {
+    if (!el) return
+    const root = editable(el)
+    if (!root) {
+      close()
+      return
+    }
+    const text = read(root)
+    const next = text.slice(0, cursor(root)).match(/@(\S*)$/)
+    if (!next) {
+      close()
+      return
+    }
+    setSpot(place())
+    void load(next[1] ?? "")
+  }
+
+  const select = (item: OutlineMention) => {
+    if (!el) return
+    const root = editable(el)
+    const selection = window.getSelection()
+    if (!root || !selection) return
+    if (selection.rangeCount === 0 || !root.contains(selection.anchorNode)) return
+    const range = selection.getRangeAt(0)
+    const text = read(root)
+    const end = cursor(root)
+    const next = text.slice(0, end).match(/@(\S*)$/)
+    const start = next ? end - next[0].length : end
+
+    if (next) {
+      edge(root, range, "start", start)
+      edge(root, range, "end", end)
+    }
+
+    range.deleteContents()
+    const gap = document.createTextNode(" ")
+    const node = mentionNode(item)
+    range.insertNode(gap)
+    range.insertNode(node)
+    range.setStartAfter(gap)
+    range.collapse(true)
+    selection.removeAllRanges()
+    selection.addRange(range)
+    close()
+    emit()
   }
 
   const tools = {
@@ -492,6 +723,61 @@ export function OutlineEditor(props: { value?: OutlineNode; onChange: (value: Ou
         props.onChange(node(data))
       },
     } as never)
+
+    const input = () => sync()
+    const click = () => window.setTimeout(sync, 0)
+    const move = () => {
+      if (!open()) return
+      setSpot(place())
+    }
+    const down = (event: KeyboardEvent) => {
+      const root = el ? editable(el) : undefined
+      if (event.key === "Backspace" && root && mentionBackspace(root)) {
+        event.preventDefault()
+        close()
+        emit()
+        return
+      }
+
+      if (open() && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+        event.preventDefault()
+        const rows = list()
+        if (rows.length === 0) return
+        const index = Math.max(
+          0,
+          rows.findIndex((item) => item.key === active()),
+        )
+        const next = (index + (event.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length
+        setActive(rows[next]?.key ?? "")
+        return
+      }
+      if (open() && (event.key === "Enter" || event.key === "Tab")) {
+        const item = list().find((item) => item.key === active()) ?? list()[0]
+        if (!item) return
+        event.preventDefault()
+        select(item)
+        return
+      }
+      if (open() && event.key === "Escape") {
+        event.preventDefault()
+        close()
+      }
+    }
+
+    el.addEventListener("input", input, true)
+    el.addEventListener("click", click, true)
+    el.addEventListener("keydown", down, true)
+    window.addEventListener("scroll", move, true)
+    window.addEventListener("resize", move)
+
+    onCleanup(() => {
+      el?.removeEventListener("input", input, true)
+      el?.removeEventListener("click", click, true)
+      el?.removeEventListener("keydown", down, true)
+      window.removeEventListener("scroll", move, true)
+      window.removeEventListener("resize", move)
+      close()
+    })
   })
 
   onCleanup(() => {
@@ -502,10 +788,51 @@ export function OutlineEditor(props: { value?: OutlineNode; onChange: (value: Ou
   })
 
   return (
-    <div class="h-full min-h-0 flex flex-col rounded-lg border border-border-weak-base bg-background-base">
+    <div
+      ref={(el) => {
+        box = el
+      }}
+      class="relative h-full min-h-0 flex flex-col rounded-lg border border-border-weak-base bg-background-base"
+    >
       <div data-component="outline-editor" class="min-h-0 flex-1  px-3 py-2">
         <div ref={el} />
       </div>
+      <Show when={open() && list().length > 0}>
+        <Portal>
+          <div
+            class="fixed z-50 overflow-auto rounded-[12px] bg-surface-raised-stronger-non-alpha p-2 shadow-[var(--shadow-lg-border-base)]"
+            style={{
+              left: `${spot()?.left ?? 0}px`,
+              top: `${spot()?.top ?? 0}px`,
+              width: `${spot()?.width ?? 320}px`,
+              "max-height": `${spot()?.max ?? 288}px`,
+            }}
+            onMouseDown={(event) => event.preventDefault()}
+          >
+            <For each={list()}>
+              {(item) => (
+                <button
+                  type="button"
+                  class="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left"
+                  classList={{ "bg-surface-raised-base-hover": active() === item.key }}
+                  onMouseEnter={() => setActive(item.key)}
+                  onClick={() => select(item)}
+                >
+                  <MentionGlyph item={item} />
+                  <div class="min-w-0 flex-1">
+                    <div class="min-w-0">
+                      <div class="truncate text-14-regular text-text-strong">{mentionHead(item)}</div>
+                      <Show when={mentionMeta(item)}>
+                        {(value) => <div class="text-12-regular text-text-weak">{value()}</div>}
+                      </Show>
+                    </div>
+                  </div>
+                </button>
+              )}
+            </For>
+          </div>
+        </Portal>
+      </Show>
     </div>
   )
 }

@@ -90,9 +90,14 @@ export default function Home() {
           <div class="mt-20 w-full flex flex-col gap-4">
             <div class="flex gap-2 items-center justify-between pl-3">
               <div class="text-14-medium text-text-strong">{language.t("home.recentProjects")}</div>
-              <Button icon="folder-add-left" size="normal" class="pl-2 pr-3" onClick={chooseProject}>
-                {language.t("command.project.open")}
-              </Button>
+              <div class="flex items-center gap-2">
+                <Button icon="checklist" size="normal" variant="ghost" class="pl-2 pr-3" onClick={() => navigate("/board")}>
+                  {language.t("home.globalBoard")}
+                </Button>
+                <Button icon="folder-add-left" size="normal" class="pl-2 pr-3" onClick={chooseProject}>
+                  {language.t("command.project.open")}
+                </Button>
+              </div>
             </div>
             <ul class="flex flex-col gap-2">
               <For each={recent()}>
@@ -116,9 +121,14 @@ export default function Home() {
         <Match when={!sync.ready}>
           <div class="mt-30 mx-auto flex flex-col items-center gap-3">
             <div class="text-12-regular text-text-weak">{language.t("common.loading")}</div>
-            <Button class="px-3" onClick={chooseProject}>
-              {language.t("command.project.open")}
-            </Button>
+            <div class="flex items-center gap-2">
+              <Button class="px-3" variant="ghost" onClick={() => navigate("/board")}>
+                {language.t("home.globalBoard")}
+              </Button>
+              <Button class="px-3" onClick={chooseProject}>
+                {language.t("command.project.open")}
+              </Button>
+            </div>
           </div>
         </Match>
         <Match when={true}>
@@ -128,9 +138,14 @@ export default function Home() {
               <div class="text-14-medium text-text-strong">{language.t("home.empty.title")}</div>
               <div class="text-12-regular text-text-weak">{language.t("home.empty.description")}</div>
             </div>
-            <Button class="px-3 mt-1" onClick={chooseProject}>
-              {language.t("command.project.open")}
-            </Button>
+            <div class="mt-1 flex items-center gap-2">
+              <Button class="px-3" variant="ghost" onClick={() => navigate("/board")}>
+                {language.t("home.globalBoard")}
+              </Button>
+              <Button class="px-3" onClick={chooseProject}>
+                {language.t("command.project.open")}
+              </Button>
+            </div>
           </div>
         </Match>
       </Switch>

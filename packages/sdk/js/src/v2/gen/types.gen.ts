@@ -4,6 +4,130 @@ export type ClientOptions = {
   baseUrl: `${string}://${string}` | (string & {})
 }
 
+export type KanbanScope = "global" | "project"
+
+export type KanbanColor = "slate" | "gray" | "blue" | "violet" | "green" | "amber" | "orange" | "red" | "pink" | "cyan"
+
+export type KanbanRef =
+  | {
+      kind: "path"
+      label: string
+      start: number
+      end: number
+      path: string
+    }
+  | {
+      kind: "collection"
+      label: string
+      start: number
+      end: number
+      scope: KanbanScope
+      collectionID: string
+      title: string
+    }
+  | {
+      kind: "note"
+      label: string
+      start: number
+      end: number
+      scope: KanbanScope
+      documentID: string
+      title: string
+    }
+
+export type KanbanTag = {
+  id: string
+  name: string
+  color?: KanbanColor
+}
+
+export type KanbanCard = {
+  id: string
+  columnID: string
+  title: string
+  titleRefs: Array<KanbanRef>
+  description?: string
+  descriptionRefs: Array<KanbanRef>
+  color?: KanbanColor
+  tags: Array<KanbanTag>
+  position: number
+}
+
+export type KanbanColumn = {
+  id: string
+  name: string
+  color?: KanbanColor
+  position: number
+  cards: Array<KanbanCard>
+}
+
+export type Kanban = {
+  scope: KanbanScope
+  projectID?: string
+  columns: Array<KanbanColumn>
+}
+
+export type KanbanTagInput = {
+  id?: string
+  name: string
+  color?: KanbanColor | null
+}
+
+export type KanbanOperation =
+  | {
+      type: "column.create"
+      name: string
+      color?: KanbanColor
+      position?: number
+    }
+  | {
+      type: "column.update"
+      columnID: string
+      name?: string
+      color?: KanbanColor | null
+    }
+  | {
+      type: "column.move"
+      columnID: string
+      position: number
+    }
+  | {
+      type: "column.delete"
+      columnID: string
+      targetColumnID?: string
+    }
+  | {
+      type: "card.create"
+      columnID: string
+      title: string
+      titleRefs?: Array<KanbanRef>
+      description?: string
+      descriptionRefs?: Array<KanbanRef>
+      color?: KanbanColor
+      tags?: Array<KanbanTagInput>
+      position?: number
+    }
+  | {
+      type: "card.update"
+      cardID: string
+      title?: string
+      titleRefs?: Array<KanbanRef>
+      description?: string
+      descriptionRefs?: Array<KanbanRef>
+      color?: KanbanColor | null
+      tags?: Array<KanbanTagInput>
+    }
+  | {
+      type: "card.move"
+      cardID: string
+      columnID: string
+      position: number
+    }
+  | {
+      type: "card.delete"
+      cardID: string
+    }
+
 export type Project = {
   id: string
   worktree: string
@@ -215,18 +339,18 @@ export type EventSessionError = {
   }
 }
 
-export type EventFileEdited = {
-  type: "file.edited"
-  properties: {
-    file: string
-  }
-}
-
 export type EventFileWatcherUpdated = {
   type: "file.watcher.updated"
   properties: {
     file: string
     event: "add" | "change" | "unlink"
+  }
+}
+
+export type EventFileEdited = {
+  type: "file.edited"
+  properties: {
+    file: string
   }
 }
 
@@ -435,6 +559,11 @@ export type EventSessionCompacted = {
   properties: {
     sessionID: string
   }
+}
+
+export type EventKanbanUpdated = {
+  type: "kanban.updated"
+  properties: Kanban
 }
 
 export type Todo = {
@@ -976,8 +1105,8 @@ export type Event =
   | EventPermissionReplied
   | EventSessionDiff
   | EventSessionError
-  | EventFileEdited
   | EventFileWatcherUpdated
+  | EventFileEdited
   | EventVcsBranchUpdated
   | EventTuiPromptAppend
   | EventTuiCommandExecute
@@ -994,6 +1123,7 @@ export type Event =
   | EventSessionStatus
   | EventSessionIdle
   | EventSessionCompacted
+  | EventKanbanUpdated
   | EventTodoUpdated
   | EventPtyCreated
   | EventPtyUpdated
@@ -1924,6 +2054,37 @@ export type ProviderAuthAuthorization = {
   instructions: string
 }
 
+export type OutlineMark = {
+  type: string
+  attrs?: {
+    [key: string]: string | number | boolean | null
+  }
+}
+
+export type OutlineNode = {
+  type: string
+  text?: string
+  attrs?: {
+    [key: string]: string | number | boolean | null
+  }
+  marks?: Array<OutlineMark>
+  content?: Array<OutlineNode>
+}
+
+export type OutlineDocumentCreate = {
+  scope: "global" | "project"
+  collection_id: string
+  parent_document_id?: string
+  title?: string
+  content?: OutlineNode
+}
+
+export type OutlineDocumentUpdate = {
+  scope: "global" | "project"
+  title?: string
+  content?: OutlineNode
+}
+
 export type Symbol = {
   name: string
   kind: number
@@ -2113,6 +2274,40 @@ export type GlobalHealthResponses = {
 }
 
 export type GlobalHealthResponse = GlobalHealthResponses[keyof GlobalHealthResponses]
+
+export type GlobalKanbanGetData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/kanban"
+}
+
+export type GlobalKanbanGetResponses = {
+  /**
+   * Kanban board
+   */
+  200: Kanban
+}
+
+export type GlobalKanbanGetResponse = GlobalKanbanGetResponses[keyof GlobalKanbanGetResponses]
+
+export type GlobalKanbanUpdateData = {
+  body?: {
+    operations: Array<KanbanOperation>
+  }
+  path?: never
+  query?: never
+  url: "/global/kanban"
+}
+
+export type GlobalKanbanUpdateResponses = {
+  /**
+   * Updated kanban board
+   */
+  200: Kanban
+}
+
+export type GlobalKanbanUpdateResponse = GlobalKanbanUpdateResponses[keyof GlobalKanbanUpdateResponses]
 
 export type GlobalEventData = {
   body?: never
@@ -4365,6 +4560,263 @@ export type ProviderOauthCallbackResponses = {
 
 export type ProviderOauthCallbackResponse = ProviderOauthCallbackResponses[keyof ProviderOauthCallbackResponses]
 
+export type KanbanGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/kanban"
+}
+
+export type KanbanGetResponses = {
+  /**
+   * Kanban board
+   */
+  200: Kanban
+}
+
+export type KanbanGetResponse = KanbanGetResponses[keyof KanbanGetResponses]
+
+export type KanbanUpdateData = {
+  body?: {
+    operations: Array<KanbanOperation>
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/kanban"
+}
+
+export type KanbanUpdateResponses = {
+  /**
+   * Updated kanban board
+   */
+  200: Kanban
+}
+
+export type KanbanUpdateResponse = KanbanUpdateResponses[keyof KanbanUpdateResponses]
+
+export type OutlineWorkspaceData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/outline/workspace"
+}
+
+export type OutlineWorkspaceResponses = {
+  /**
+   * Outline workspace snapshot
+   */
+  200: unknown
+}
+
+export type DeleteOutlineDocumentDocumentIdData = {
+  body?: never
+  path: {
+    documentID: string
+  }
+  query: {
+    directory?: string
+    workspace?: string
+    scope: "global" | "project"
+  }
+  url: "/outline/document/{documentID}"
+}
+
+export type DeleteOutlineDocumentDocumentIdResponses = {
+  200: unknown
+}
+
+export type OutlineDocumentGetData = {
+  body?: never
+  path: {
+    documentID: string
+  }
+  query: {
+    directory?: string
+    workspace?: string
+    scope: "global" | "project"
+  }
+  url: "/outline/document/{documentID}"
+}
+
+export type OutlineDocumentGetResponses = {
+  /**
+   * Outline document
+   */
+  200: unknown
+}
+
+export type PatchOutlineDocumentDocumentIdData = {
+  body?: OutlineDocumentUpdate
+  path: {
+    documentID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/outline/document/{documentID}"
+}
+
+export type PatchOutlineDocumentDocumentIdResponses = {
+  200: unknown
+}
+
+export type OutlineSearchData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    scope: "global" | "project"
+    query?: string
+  }
+  url: "/outline/search"
+}
+
+export type OutlineSearchResponses = {
+  /**
+   * Search hits
+   */
+  200: unknown
+}
+
+export type PostOutlineCollectionData = {
+  body?: {
+    scope: "global" | "project"
+    title: string
+    description?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/outline/collection"
+}
+
+export type PostOutlineCollectionResponses = {
+  200: unknown
+}
+
+export type DeleteOutlineCollectionCollectionIdData = {
+  body?: never
+  path: {
+    collectionID: string
+  }
+  query: {
+    directory?: string
+    workspace?: string
+    scope: "global" | "project"
+  }
+  url: "/outline/collection/{collectionID}"
+}
+
+export type DeleteOutlineCollectionCollectionIdResponses = {
+  200: unknown
+}
+
+export type PatchOutlineCollectionCollectionIdData = {
+  body?: {
+    scope: "global" | "project"
+    title?: string
+    description?: string
+  }
+  path: {
+    collectionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/outline/collection/{collectionID}"
+}
+
+export type PatchOutlineCollectionCollectionIdResponses = {
+  200: unknown
+}
+
+export type PostOutlineCollectionCollectionIdArchiveData = {
+  body?: {
+    scope: "global" | "project"
+    archived?: boolean
+  }
+  path: {
+    collectionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/outline/collection/{collectionID}/archive"
+}
+
+export type PostOutlineCollectionCollectionIdArchiveResponses = {
+  200: unknown
+}
+
+export type PostOutlineDocumentData = {
+  body?: OutlineDocumentCreate
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/outline/document"
+}
+
+export type PostOutlineDocumentResponses = {
+  200: unknown
+}
+
+export type PostOutlineDocumentDocumentIdMoveData = {
+  body?: {
+    scope: "global" | "project"
+    collection_id?: string
+    parent_document_id?: string | null
+    index?: number
+  }
+  path: {
+    documentID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/outline/document/{documentID}/move"
+}
+
+export type PostOutlineDocumentDocumentIdMoveResponses = {
+  200: unknown
+}
+
+export type PostOutlineDocumentDocumentIdArchiveData = {
+  body?: {
+    scope: "global" | "project"
+    archived?: boolean
+  }
+  path: {
+    documentID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/outline/document/{documentID}/archive"
+}
+
+export type PostOutlineDocumentDocumentIdArchiveResponses = {
+  200: unknown
+}
+
 export type FindTextData = {
   body?: never
   path?: never
@@ -4491,7 +4943,7 @@ export type FileReadResponses = {
 export type FileReadResponse = FileReadResponses[keyof FileReadResponses]
 
 export type FileWriteData = {
-  body: {
+  body?: {
     content: string
   }
   path?: never
@@ -5277,7 +5729,7 @@ export type VcsDiscardResponses = {
 export type VcsDiscardResponse = VcsDiscardResponses[keyof VcsDiscardResponses]
 
 export type VcsCommitData = {
-  body: {
+  body?: {
     message: string
   }
   path?: never
@@ -5298,7 +5750,7 @@ export type VcsCommitResponses = {
 export type VcsCommitResponse = VcsCommitResponses[keyof VcsCommitResponses]
 
 export type VcsAmendData = {
-  body: {
+  body?: {
     message: string
   }
   path?: never

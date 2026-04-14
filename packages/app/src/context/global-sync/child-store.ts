@@ -179,6 +179,7 @@ export function createChildStoreManager(input: {
             lsp_ready: false,
             lsp: [],
             vcs: vcsStore.value,
+            kanban: undefined,
             limit: 5,
             message: {},
             part: {},

@@ -1,5 +1,6 @@
 import type {
   Config,
+  Kanban,
   OpencodeClient,
   Path,
   PermissionRequest,
@@ -29,6 +30,7 @@ type GlobalStore = {
   provider: ProviderListResponse
   provider_auth: ProviderAuthResponse
   config: Config
+  kanban: Kanban | undefined
   reload: undefined | "pending" | "complete"
 }
 
@@ -99,6 +101,12 @@ export async function bootstrapGlobal(input: {
       retry(() =>
         input.globalSDK.provider.list().then((x) => {
           input.setGlobalStore("provider", normalizeProviderList(x.data!))
+        }),
+      ),
+    () =>
+      retry(() =>
+        input.globalSDK.global.kanban.get().then((x) => {
+          input.setGlobalStore("kanban", x.data!)
         }),
       ),
   ]
@@ -226,6 +234,7 @@ export async function bootstrapDirectory(input: {
     () => retry(() => input.sdk.app.agents().then((x) => input.setStore("agent", normalizeAgentList(x.data)))),
     () => retry(() => input.sdk.config.get().then((x) => input.setStore("config", x.data!))),
     () => retry(() => input.sdk.session.status().then((x) => input.setStore("session_status", x.data!))),
+    () => retry(() => input.sdk.kanban.get().then((x) => input.setStore("kanban", x.data!))),
   ]
 
   const slow = [

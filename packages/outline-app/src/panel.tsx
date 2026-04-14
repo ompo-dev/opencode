@@ -7,6 +7,7 @@ import { InlineInput } from "@opencode-ai/ui/inline-input"
 import { TextField } from "@opencode-ai/ui/text-field"
 import { createEffect, createMemo, createSignal, For, Match, onCleanup, onMount, Show, Switch } from "solid-js"
 import { OutlineEditor } from "./editor"
+import type { OutlineMention } from "./mentions"
 import type {
   OutlineCollection,
   OutlineDocument,
@@ -52,6 +53,7 @@ export type OutlinePanelApi = {
   document_archive: (input: { scope: OutlineScope; document_id: string; archived?: boolean }) => Promise<unknown>
   document_delete: (input: { scope: OutlineScope; document_id: string }) => Promise<unknown>
   search: (input: { scope: OutlineScope; query: string }) => Promise<OutlineSearchHit[]>
+  mentions: (query: string) => Promise<OutlineMention[]>
 }
 
 type Picked = {
@@ -604,6 +606,7 @@ export function OutlinePanel(props: { api: OutlinePanelApi; width: number }) {
                       {(_) => (
                         <OutlineEditor
                           value={doc()?.content}
+                          mentions={props.api.mentions}
                           onChange={(content) => {
                             const title = doc()?.meta.title || value().meta.title
                             setDoc((prev) => (prev ? { ...prev, content } : prev))

@@ -1,0 +1,39 @@
+opencode script {
+  "channel": "dev",
+  "version": "0.0.0-dev-202604140000",
+  "preview": true,
+  "release": false,
+  "team": [
+    "adamdotdevin",
+    "Brendonovich",
+    "fwang",
+    "Hona",
+    "iamdavidhill",
+    "jayair",
+    "jlongster",
+    "kitlangton",
+    "kommander",
+    "MrMushrooooom",
+    "nexxeln",
+    "R44VC0RP",
+    "rekram1-node",
+    "RhysSullivan",
+    "thdxr",
+    "actions-user",
+    "opencode",
+    "opencode-agent[bot]"
+  ]
+}
+Generated models-snapshot.js
+Loaded 13 migrations
+building opencode-windows-x64
+Running smoke test: dist/opencode-windows-x64/bin/opencode --version
+Smoke test passed: 0.0.0-dev-202604140000
+building opencode-windows-x64-baseline
+Running smoke test: dist/opencode-windows-x64-baseline/bin/opencode --version
+Smoke test passed: 0.0.0-dev-202604140000
+Copied C:\Projects\Teste\opencode\packages\opencode\dist\opencode-windows-x64-baseline\bin\opencode.exe to src-tauri/sidecars/opencode-cli-x86_64-pc-windows-msvc.exe
+
+  [32m[1mVITE[22m v7.1.4[39m  [2mready in [0m[1m953[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m1420[22m/[39m

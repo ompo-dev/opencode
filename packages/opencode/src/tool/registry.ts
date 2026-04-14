@@ -1,6 +1,7 @@
 import { PlanExitTool } from "./plan"
 import { QuestionTool } from "./question"
 import { BashTool } from "./bash"
+import { KanbanTool } from "./kanban"
 import { EditTool } from "./edit"
 import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
@@ -154,6 +155,7 @@ export namespace ToolRegistry {
             task: Tool.init(task),
             fetch: Tool.init(WebFetchTool),
             todo: Tool.init(todo),
+            kanban: Tool.init(KanbanTool),
             search: Tool.init(WebSearchTool),
             code: Tool.init(CodeSearchTool),
             skill: Tool.init(SkillTool),
@@ -177,6 +179,7 @@ export namespace ToolRegistry {
               tool.task,
               tool.fetch,
               tool.todo,
+              tool.kanban,
               tool.search,
               tool.code,
               tool.skill,

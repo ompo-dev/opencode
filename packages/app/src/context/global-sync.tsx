@@ -1,5 +1,6 @@
 import type {
   Config,
+  Kanban,
   OpencodeClient,
   Path,
   Project,
@@ -38,6 +39,7 @@ type GlobalStore = {
   provider: ProviderListResponse
   provider_auth: ProviderAuthResponse
   config: Config
+  kanban: Kanban | undefined
   reload: undefined | "pending" | "complete"
 }
 
@@ -65,6 +67,7 @@ function createGlobalSync() {
     provider: { all: [], connected: [], default: {} },
     provider_auth: {},
     config: {},
+    kanban: undefined,
     reload: undefined,
   })
 
@@ -292,6 +295,9 @@ function createGlobalSync() {
         refresh: () => {
           if (recent) return
           queue.refresh()
+        },
+        setGlobalKanban: (next) => {
+          setGlobalStore("kanban", reconcile(next))
         },
         setGlobalProject: setProjects,
       })
