@@ -6,6 +6,11 @@ describe("normalizeSpeechText", () => {
     const text = normalizeSpeechText("**Hello** [laughter] [link](https://example.com) `x`")
     expect(text).toBe("Hello [laughter] link x")
   })
+
+  test("turns markdown structure into speakable sentences", () => {
+    const text = normalizeSpeechText("# Summary\n- first item\n- second item\n> quoted line")
+    expect(text).toBe("Summary.\nfirst item.\nsecond item.\nquoted line.")
+  })
 })
 
 describe("SentenceChunker", () => {

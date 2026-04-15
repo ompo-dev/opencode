@@ -107,6 +107,29 @@ describe("voiceCfg", () => {
     expect(out.num_step).toBe(24)
   })
 
+  test("normalizes markdown before synthesis when stripping is enabled", () => {
+    const cfg = voiceCfg({
+      tts: {
+        strip_markdown: true,
+        presets: [
+          {
+            id: "clone",
+            name: "Clone",
+            mode: "clone",
+            ref_audio_path: "C:\\voice\\ref.wav",
+          },
+        ],
+      },
+    })
+
+    const out = voiceInput({
+      config: cfg,
+      text: "# Title\n- alpha\n- beta",
+    })
+
+    expect(out.text).toBe("Title.\nalpha.\nbeta.")
+  })
+
   test("parses extended engine status", () => {
     const cfg = voiceCfg()
     const out = Status.parse({

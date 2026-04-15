@@ -1,6 +1,8 @@
 const guard = /```[\s\S]*?```/g
 const code = /`([^`]+)`/g
+const image = /!\[([^\]]*)\]\(([^)]+)\)/g
 const link = /\[([^\]]+)\]\(([^)]+)\)/g
+const url = /https?:\/\/\S+/g
 const html = /<\/?[^>]+>/g
 const emphasis = /[*_~]+/g
 const tag = /\[(laughter|sigh|confirmation-en|question-en|question-ah|question-oh|question-ei|question-yi|surprise-ah|surprise-oh|surprise-wa|surprise-yo|dissatisfaction-hnn)\]/g
@@ -28,6 +30,52 @@ function restore(input: string, map: string[]) {
 
 function clean(input: string) {
   return input.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/[ \t]{2,}/g, " ").trim()
+}
+
+function mark(input: string) {
+  const text = input.trim()
+  if (!text) return ""
+  if (/[.!?;:。！？…]$/.test(text)) return text
+  if (/\u0000\d+\u0000$/.test(text)) return text
+  return `${text}.`
+}
+
+function speak(input: string) {
+  return input
+    .split("\n")
+    .flatMap((line) => {
+      const text = line.trim()
+      if (!text) return [""]
+
+      const head = text.match(/^#{1,6}\s+(.+)$/)
+      if (head?.[1]) return [mark(head[1])]
+
+      const task = text.match(/^(?:[-+*]|\d+[.)])\s+\[(?: |x|X)\]\s+(.+)$/)
+      if (task?.[1]) return [mark(task[1])]
+
+      const list = text.match(/^([-+*]|\d+[.)])\s+(.+)$/)
+      if (list?.[2]) {
+        if (/^\d/.test(list[1] ?? "")) return [mark(`${(list[1] ?? "").replace(/[.)]$/, "")}. ${list[2]}`)]
+        return [mark(list[2])]
+      }
+
+      const quote = text.match(/^>\s?(.*)$/)
+      if (quote?.[1]) return [mark(quote[1])]
+
+      if (/^\|.+\|$/.test(text)) {
+        const cols = text
+          .split("|")
+          .map((item) => item.trim())
+          .filter(Boolean)
+        if (cols.length === 0) return [""]
+        if (cols.every((item) => /^:?-+:?$/.test(item))) return [""]
+        return [mark(cols.join(", "))]
+      }
+
+      if (/^[-*_]{3,}$/.test(text)) return [""]
+      return [text]
+    })
+    .join("\n")
 }
 
 function lead(input: string, idx: number) {
@@ -66,7 +114,19 @@ export function normalizeSpeechText(input: string, opts?: { stripMarkdown?: bool
   const { map, text } = protect(input.replace(/\r\n?/g, "\n"))
   if (opts?.stripMarkdown === false) return clean(restore(text, map))
   return clean(
-    restore(text.replace(guard, " ").replace(code, "$1").replace(link, "$1").replace(html, " ").replace(emphasis, ""), map),
+    restore(
+      speak(
+        text
+          .replace(guard, " ")
+          .replace(image, "$1")
+          .replace(link, "$1")
+          .replace(url, " ")
+          .replace(code, "$1")
+          .replace(html, " ")
+          .replace(emphasis, ""),
+      ),
+      map,
+    ),
   )
 }
 

@@ -1,4 +1,5 @@
 import z from "zod"
+import { normalizeSpeechText } from "./chunk"
 
 export const voiceTags = [
   "[laughter]",
@@ -405,7 +406,7 @@ export function voiceInput(input: {
   const cfg = ConfigCfg.parse(input.config)
   const item = voicePreset(cfg, input.preset)
   return SynthesizeInput.parse({
-    text: input.text,
+    text: normalizeSpeechText(input.text, { stripMarkdown: cfg.tts.strip_markdown }),
     mode: item?.mode,
     ref_audio_path: item?.ref_audio_path,
     ref_text: item?.ref_text,
