@@ -177,6 +177,43 @@ export const Phase = z
   .enum(["disabled", "idle", "ensuring", "starting", "ready", "busy", "error"])
   .meta({ ref: "VoicePhase" })
 
+export const Activity = z
+  .object({
+    target: z.enum(["stt", "tts", "all"]).nullable(),
+    stage: z.string().optional(),
+    progress: z.number().int().min(0).max(100).optional(),
+  })
+  .strict()
+  .meta({ ref: "VoiceActivity" })
+
+export const ModelStatus = z
+  .object({
+    id: z.string(),
+    downloaded: z.boolean(),
+    active: z.boolean(),
+    loading: z.boolean(),
+    progress: z.number().int().min(0).max(100).optional(),
+    note: z.string().optional(),
+  })
+  .strict()
+  .meta({ ref: "VoiceModelStatus" })
+
+export const EngineStatus = z
+  .object({
+    installed: z.boolean(),
+    worker: z.boolean(),
+    warmed: z.boolean(),
+    standby: z.boolean(),
+    device: z.string().optional(),
+    model: z.string().optional(),
+    loading: z.boolean(),
+    progress: z.number().int().min(0).max(100).optional(),
+    note: z.string().optional(),
+    models: z.array(ModelStatus).optional(),
+  })
+  .strict()
+  .meta({ ref: "VoiceEngineStatus" })
+
 export const Status = z
   .object({
     ready: z.boolean(),
@@ -187,6 +224,13 @@ export const Status = z
     worker: z.boolean(),
     ffmpeg: z.boolean(),
     error: z.string().optional(),
+    activity: Activity,
+    engines: z
+      .object({
+        stt: EngineStatus,
+        tts: EngineStatus,
+      })
+      .strict(),
     config: ConfigCfg,
     paths: Paths,
   })

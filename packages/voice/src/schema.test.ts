@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Paths, voiceCfg, voiceDesignText, voiceInput, voicePreset, voiceTags } from "./schema"
+import { Paths, Status, voiceCfg, voiceDesignText, voiceInput, voicePreset, voiceTags } from "./schema"
 
 describe("voiceCfg", () => {
   test("fills defaults", () => {
@@ -105,5 +105,79 @@ describe("voiceCfg", () => {
     expect(out.instruct).toBe("warm")
     expect(out.speed).toBe(1.15)
     expect(out.num_step).toBe(24)
+  })
+
+  test("parses extended engine status", () => {
+    const cfg = voiceCfg()
+    const out = Status.parse({
+      ready: true,
+      phase: "ready",
+      active_engine: "tts",
+      device: "cuda",
+      diarization: false,
+      worker: true,
+      ffmpeg: true,
+      activity: {
+        target: "all",
+        stage: "warm:tts",
+        progress: 92,
+      },
+      engines: {
+        stt: {
+          installed: true,
+          worker: true,
+          warmed: true,
+          standby: true,
+          model: "small",
+          loading: false,
+          models: [
+            {
+              id: "small",
+              downloaded: true,
+              active: true,
+              loading: false,
+            },
+          ],
+        },
+        tts: {
+          installed: true,
+          worker: true,
+          warmed: true,
+          standby: true,
+          model: "k2-fsa/OmniVoice",
+          loading: true,
+          progress: 92,
+          note: "warm:tts",
+          models: [
+            {
+              id: "k2-fsa/OmniVoice",
+              downloaded: true,
+              active: true,
+              loading: true,
+              progress: 92,
+            },
+          ],
+        },
+      },
+      config: cfg,
+      paths: Paths.parse({
+        root: "C:\\voice",
+        references: "C:\\voice\\references",
+        stt_root: "C:\\voice\\stt",
+        stt_venv: "C:\\voice\\stt\\venv",
+        stt_python: "C:\\voice\\stt\\venv\\Scripts\\python.exe",
+        stt_marker: "C:\\voice\\stt\\install.json",
+        tts_root: "C:\\voice\\tts",
+        tts_venv: "C:\\voice\\tts\\venv",
+        tts_python: "C:\\voice\\tts\\venv\\Scripts\\python.exe",
+        tts_marker: "C:\\voice\\tts\\install.json",
+        ffmpeg_dir: "C:\\voice\\ffmpeg",
+        hf: "C:\\voice\\hf",
+        tmp: "C:\\voice\\tmp",
+      }),
+    })
+
+    expect(out.engines.stt.models?.[0]?.downloaded).toBe(true)
+    expect(out.activity.progress).toBe(92)
   })
 })

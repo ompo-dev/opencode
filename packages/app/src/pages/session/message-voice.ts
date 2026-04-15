@@ -159,6 +159,7 @@ export function createMessageVoice(input: {
   volume: Accessor<number>
 }) {
   let bad = false
+  let warm = false
   let live = ""
   let busy = ""
   let done = ""
@@ -279,6 +280,19 @@ export function createMessageVoice(input: {
     input.mute()
     input.volume()
     ctrl.update()
+  })
+
+  createEffect(() => {
+    if (warm) return
+    if (!input.cfg().runtime.enabled) return
+    warm = true
+    void input.globalSDK.client.global.voice
+      .ensure({
+        voiceEnsureInput: {
+          preload: true,
+        },
+      })
+      .catch(() => undefined)
   })
 
   createEffect((prev) => {

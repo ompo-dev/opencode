@@ -130,6 +130,34 @@ export type KanbanOperation =
 
 export type VoicePhase = "disabled" | "idle" | "ensuring" | "starting" | "ready" | "busy" | "error"
 
+export type VoiceActivity = {
+  target: "stt" | "tts" | "all" | null
+  stage?: string
+  progress?: number
+}
+
+export type VoiceModelStatus = {
+  id: string
+  downloaded: boolean
+  active: boolean
+  loading: boolean
+  progress?: number
+  note?: string
+}
+
+export type VoiceEngineStatus = {
+  installed: boolean
+  worker: boolean
+  warmed: boolean
+  standby: boolean
+  device?: string
+  model?: string
+  loading: boolean
+  progress?: number
+  note?: string
+  models?: Array<VoiceModelStatus>
+}
+
 export type VoiceRuntimeConfig = {
   enabled: boolean
   python: string
@@ -237,6 +265,11 @@ export type VoiceStatus = {
   worker: boolean
   ffmpeg: boolean
   error?: string
+  activity: VoiceActivity
+  engines: {
+    stt: VoiceEngineStatus
+    tts: VoiceEngineStatus
+  }
   config: VoiceConfigResolved
   paths: VoicePaths
 }

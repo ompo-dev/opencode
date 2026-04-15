@@ -48,7 +48,7 @@ export const DialogSettings: Component = () => {
                     </Tabs.Trigger>
                     <Tabs.Trigger value="voice">
                       <Icon name="mic" />
-                      Voice
+                      {language.locale() === "br" ? "Voz" : "Voice"}
                     </Tabs.Trigger>
                   </div>
                 </div>

@@ -6,6 +6,7 @@ import { TextField } from "@opencode-ai/ui/text-field"
 import { showToast } from "@opencode-ai/ui/toast"
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type Component, type JSX } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
+import { useLanguage } from "@/context/language"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { useGlobalSync } from "@/context/global-sync"
 import { useSettings } from "@/context/settings"
@@ -40,9 +41,23 @@ const dtypes = [
 const ctypes = dtypes.filter((item) => item.value !== "auto")
 
 const stamps = [
-  { value: "none", label: "None" },
-  { value: "segment", label: "Segment" },
-  { value: "word", label: "Word" },
+  { value: "none", label: "Sem timestamps" },
+  { value: "segment", label: "Por segmento" },
+  { value: "word", label: "Por palavra" },
+] as const
+
+const sttlangs = [
+  { value: "auto", label: "Automático" },
+  { value: "pt", label: "Português (pt)" },
+  { value: "en", label: "Inglês (en)" },
+  { value: "es", label: "Espanhol (es)" },
+  { value: "fr", label: "Francês (fr)" },
+  { value: "de", label: "Alemão (de)" },
+  { value: "it", label: "Italiano (it)" },
+  { value: "ja", label: "Japonês (ja)" },
+  { value: "ko", label: "Coreano (ko)" },
+  { value: "zh", label: "Chinês (zh)" },
+  { value: "ru", label: "Russo (ru)" },
 ] as const
 
 const sttmodels = [
@@ -64,30 +79,30 @@ const sttmodels = [
 
 const modes = [
   { value: "auto", label: "Auto" },
-  { value: "clone", label: "Clone" },
-  { value: "design", label: "Design" },
+  { value: "clone", label: "Clonagem" },
+  { value: "design", label: "Design de voz" },
 ] as const
 
-const chunk = [{ value: "sentence", label: "Sentence" }] as const
+const chunk = [{ value: "sentence", label: "Por frase" }] as const
 const autos = [{ value: "", label: "Auto" }] as const
-const genders = [...autos, { value: "female", label: "Female" }, { value: "male", label: "Male" }] as const
+const genders = [...autos, { value: "female", label: "Feminino" }, { value: "male", label: "Masculino" }] as const
 const ages = [
   ...autos,
-  { value: "child", label: "Child" },
-  { value: "teenager", label: "Teenager" },
-  { value: "young adult", label: "Young adult" },
-  { value: "middle-aged", label: "Middle-aged" },
-  { value: "elderly", label: "Elderly" },
+  { value: "child", label: "Criança" },
+  { value: "teenager", label: "Adolescente" },
+  { value: "young adult", label: "Jovem adulto" },
+  { value: "middle-aged", label: "Meia-idade" },
+  { value: "elderly", label: "Idoso" },
 ] as const
 const pitches = [
   ...autos,
-  { value: "very low pitch", label: "Very low" },
-  { value: "low pitch", label: "Low" },
-  { value: "moderate pitch", label: "Moderate" },
-  { value: "high pitch", label: "High" },
-  { value: "very high pitch", label: "Very high" },
+  { value: "very low pitch", label: "Muito grave" },
+  { value: "low pitch", label: "Grave" },
+  { value: "moderate pitch", label: "Médio" },
+  { value: "high pitch", label: "Agudo" },
+  { value: "very high pitch", label: "Muito agudo" },
 ] as const
-const styles = [...autos, { value: "whisper", label: "Whisper" }] as const
+const styles = [...autos, { value: "whisper", label: "Sussurro" }] as const
 const accents = [
   ...autos,
   { value: "american accent", label: "American" },
@@ -197,28 +212,32 @@ const saveAudio = (audio: string, name: string) => {
 }
 
 export const SettingsVoice: Component = () => {
+  const language = useLanguage()
   const globalSDK = useGlobalSDK()
   const globalSync = useGlobalSync()
   const settings = useSettings()
+  const br = createMemo(() => language.locale() === "br")
+  const tx = (pt: string, en = pt) => (br() ? pt : en)
   const [status, setStatus] = createSignal<VoiceStatus>()
   const [store, setStore] = createStore({
     saving: false,
     ensuring: false,
     preset: "",
+    custom: false,
   })
   const [draft, setDraft] = createStore<VoiceConfigResolved>(source(globalSync.data.config.voice))
   const [inputs, setInputs] = createStore({
     tags: "",
   })
   const [preview, setPreview] = createStore({
-    text: "Hello from OpenCode.",
+    text: tx("Olá do OpenCode.", "Hello from OpenCode."),
     audio: "",
-    status: "Ready to synthesize a preview.",
+    status: tx("Pronto para sintetizar uma prévia.", "Ready to synthesize a preview."),
     busy: false,
   })
   const [capture, setCapture] = createStore({
     mode: "idle" as "idle" | "preparing" | "recording" | "saving" | "error",
-    status: "Ready to capture a reference voice clip.",
+    status: tx("Pronto para capturar um áudio de referência.", "Ready to capture a reference voice clip."),
     duration_ms: 0,
   })
   const [ref, setRef] = createStore({
@@ -227,7 +246,9 @@ export const SettingsVoice: Component = () => {
     loading: false,
     error: "",
   })
-  const [audio, setAudio] = createSignal<Array<{ value: string; label: string }>>([{ value: "", label: "System default" }])
+  const [audio, setAudio] = createSignal<Array<{ value: string; label: string }>>([
+    { value: "", label: tx("Padrão do sistema", "System default") },
+  ])
   let rec: Awaited<ReturnType<typeof startPromptRecording>> | undefined
 
   const current = createMemo(() => source(globalSync.data.config.voice))
@@ -235,11 +256,52 @@ export const SettingsVoice: Component = () => {
   const preset = createMemo(() => draft.tts.presets.find((item) => item.id === store.preset))
   const clone = createMemo(() => preset()?.mode === "clone")
   const design = createMemo(() => preset()?.mode === "design")
-  const models = createMemo(() => {
-    const list = sttmodels.map((item) => ({ ...item }))
-    if (list.some((item) => item.value === draft.stt.model)) return list
-    if (!draft.stt.model.trim()) return list
-    return [{ value: draft.stt.model, label: `Custom (${draft.stt.model})` }, ...list]
+  const models = createMemo(() => sttmodels.map((item) => ({ ...item })))
+  const modelMap = createMemo(() => new Map((status()?.engines.stt.models ?? []).map((item) => [item.id, item])))
+  const modelList = createMemo(() =>
+    models().map((item) => {
+      const hit = modelMap().get(item.value)
+      return {
+        ...item,
+        downloaded: !!hit?.downloaded,
+        loading: !!hit?.loading,
+        progress: hit?.progress,
+        active: draft.stt.model === item.value,
+        note: hit?.note,
+      }
+    }),
+  )
+  const customModel = createMemo(() => !sttmodels.some((item) => item.value === draft.stt.model) || store.custom)
+  const runtimeReady = createMemo(() => status()?.engines.stt.standby && status()?.engines.tts.standby)
+  const activity = createMemo(() => status()?.activity)
+  const phaseText = createMemo(() => {
+    const value = status()?.phase
+    const map: Record<string, string> = {
+      disabled: tx("desativado", "disabled"),
+      idle: tx("ocioso", "idle"),
+      ensuring: tx("preparando", "ensuring"),
+      starting: tx("iniciando", "starting"),
+      ready: tx("pronto", "ready"),
+      busy: tx("ocupado", "busy"),
+      error: tx("erro", "error"),
+    }
+    return map[value ?? "idle"] ?? value ?? tx("ocioso", "idle")
+  })
+  const activityText = createMemo(() => {
+    const item = activity()
+    if (!item?.stage) return
+    const map: Record<string, string> = {
+      dirs: tx("Preparando pastas", "Preparing directories"),
+      ffmpeg: tx("Verificando FFmpeg", "Checking FFmpeg"),
+      "install:stt": tx("Instalando runtime do WhisperX", "Installing WhisperX runtime"),
+      "install:tts": tx("Instalando runtime do OmniVoice", "Installing OmniVoice runtime"),
+      "start:stt": tx("Iniciando WhisperX", "Starting WhisperX"),
+      "start:tts": tx("Iniciando OmniVoice", "Starting OmniVoice"),
+      "warm:stt": tx("Aquecendo WhisperX", "Warming WhisperX"),
+      "warm:tts": tx("Aquecendo OmniVoice", "Warming OmniVoice"),
+      ready: tx("Pronto", "Ready"),
+    }
+    return map[item.stage] ?? item.stage
   })
 
   const syncDraft = () => {
@@ -247,6 +309,7 @@ export const SettingsVoice: Component = () => {
     setDraft(reconcile(next))
     const fallback = next.tts.default_preset ?? next.tts.presets[0]?.id ?? ""
     setStore("preset", fallback)
+    setStore("custom", !sttmodels.some((item) => item.value === next.stt.model))
     setInputs("tags", next.tts.presets.find((item) => item.id === fallback)?.tags?.join(", ") ?? "")
   }
 
@@ -256,8 +319,8 @@ export const SettingsVoice: Component = () => {
   }
 
   const notify = (error: unknown) => {
-    const message = formatServerError(error, undefined, "Voice request failed")
-    showToast({ title: "Voice settings failed", description: message })
+    const message = formatServerError(error, undefined, tx("A requisição de voz falhou", "Voice request failed"))
+    showToast({ title: tx("Falha nas configurações de voz", "Voice settings failed"), description: message })
   }
 
   const save = async () => {
@@ -351,15 +414,15 @@ export const SettingsVoice: Component = () => {
       .filter((item) => item.kind === "audioinput")
       .map((item, idx) => ({
         value: item.deviceId,
-        label: item.label || `Input ${idx + 1}`,
+        label: item.label || tx(`Entrada ${idx + 1}`, `Input ${idx + 1}`),
       }))
-    setAudio([{ value: "", label: "System default" }, ...next])
+    setAudio([{ value: "", label: tx("Padrão do sistema", "System default") }, ...next])
   }
 
   const previewVoice = async () => {
     if (preview.busy) return
     setPreview("busy", true)
-    setPreview("status", "Synthesizing preview...")
+    setPreview("status", tx("Sintetizando prévia...", "Synthesizing preview..."))
     try {
       const res = await globalSDK.client.global.voice.synthesize({
         voiceSynthesizeInput: voiceInput({
@@ -370,7 +433,7 @@ export const SettingsVoice: Component = () => {
       })
       const audio = res.data?.audio ?? ""
       setPreview("audio", audio)
-      setPreview("status", audio ? "Preview ready." : "No audio returned.")
+      setPreview("status", audio ? tx("Prévia pronta.", "Preview ready.") : tx("Nenhum áudio foi retornado.", "No audio returned."))
       voiceDebug.tts({
         state: audio ? "ready" : "empty",
         duration_ms: res.data?.duration_ms,
@@ -379,7 +442,7 @@ export const SettingsVoice: Component = () => {
         error: undefined,
       })
     } catch (error) {
-      const message = formatServerError(error, undefined, "Voice request failed")
+      const message = formatServerError(error, undefined, tx("A requisição de voz falhou", "Voice request failed"))
       setPreview("status", message)
       voiceDebug.tts({
         state: "error",
@@ -397,14 +460,14 @@ export const SettingsVoice: Component = () => {
     if (capture.mode === "preparing" || capture.mode === "recording" || capture.mode === "saving") return
     const device = settings.voice.device() || undefined
     setCapture("mode", "preparing")
-    setCapture("status", "Starting microphone...")
+    setCapture("status", tx("Iniciando microfone...", "Starting microphone..."))
     try {
       rec = await startPromptRecording({ device })
       setCapture("mode", "recording")
-      setCapture("status", "Recording reference audio...")
+      setCapture("status", tx("Gravando áudio de referência...", "Recording reference audio..."))
     } catch (error) {
       rec = undefined
-      const message = formatServerError(error, undefined, "Voice capture failed")
+      const message = formatServerError(error, undefined, tx("A captura de voz falhou", "Voice capture failed"))
       setCapture("mode", "error")
       setCapture("status", message)
       notify(error)
@@ -419,7 +482,7 @@ export const SettingsVoice: Component = () => {
     })
     setCapture("mode", "saving")
     setCapture("duration_ms", clip.duration_ms)
-    setCapture("status", "Saving reference audio...")
+    setCapture("status", tx("Salvando áudio de referência...", "Saving reference audio..."))
     try {
       const res = await globalSDK.client.global.voice.reference({
         voiceReferenceInput: {
@@ -440,18 +503,18 @@ export const SettingsVoice: Component = () => {
         error: "",
       })
       const status = out?.transcript_error
-        ? `Reference saved. Transcription failed: ${out.transcript_error}`
+        ? tx(`Referência salva. A transcrição falhou: ${out.transcript_error}`, `Reference saved. Transcription failed: ${out.transcript_error}`)
         : out?.text
-          ? "Reference saved and transcribed."
-          : "Reference saved."
+          ? tx("Referência salva e transcrita.", "Reference saved and transcribed.")
+          : tx("Referência salva.", "Reference saved.")
       setCapture("mode", "idle")
       setCapture("status", status)
       showToast({
-        title: "Reference audio saved",
+        title: tx("Áudio de referência salvo", "Reference audio saved"),
         description: out?.transcript_error ? status : out?.path,
       })
     } catch (error) {
-      const message = formatServerError(error, undefined, "Voice capture failed")
+      const message = formatServerError(error, undefined, tx("A captura de voz falhou", "Voice capture failed"))
       setCapture("mode", "error")
       setCapture("status", message)
       notify(error)
@@ -463,7 +526,7 @@ export const SettingsVoice: Component = () => {
     patchPreset("ref_text", undefined)
     setCapture("duration_ms", 0)
     setCapture("mode", "idle")
-    setCapture("status", "Reference cleared.")
+    setCapture("status", tx("Referência limpa.", "Reference cleared."))
     setRef({
       audio: "",
       name: "",
@@ -503,13 +566,18 @@ export const SettingsVoice: Component = () => {
       "status",
       next
         ? next.mode === "clone" && !next.ref_audio_path
-          ? "Record a reference clip to preview this cloned voice."
-          : `Editing ${next.name}.`
-        : "Ready to synthesize a preview.",
+          ? tx("Grave um trecho de referência para testar esta voz clonada.", "Record a reference clip to preview this cloned voice.")
+          : tx(`Editando ${next.name}.`, `Editing ${next.name}.`)
+        : tx("Pronto para sintetizar uma prévia.", "Ready to synthesize a preview."),
     )
     setCapture("duration_ms", 0)
     setCapture("mode", "idle")
-    setCapture("status", next ? "Ready to capture a reference voice clip." : "Select a preset to capture a reference.")
+    setCapture(
+      "status",
+      next
+        ? tx("Pronto para capturar um áudio de referência.", "Ready to capture a reference voice clip.")
+        : tx("Selecione um preset para capturar uma referência.", "Select a preset to capture a reference."),
+    )
     setRef({
       audio: "",
       name: "",
@@ -549,7 +617,11 @@ export const SettingsVoice: Component = () => {
           audio: "",
           name: leaf(file),
           loading: false,
-          error: formatServerError(error, undefined, "Reference audio could not be loaded"),
+          error: formatServerError(
+            error,
+            undefined,
+            tx("Não foi possível carregar o áudio de referência", "Reference audio could not be loaded"),
+          ),
         })
       })
     onCleanup(() => {
@@ -563,10 +635,21 @@ export const SettingsVoice: Component = () => {
         <div class="flex flex-col gap-3 pt-6 pb-8 max-w-[860px]">
           <div class="flex items-center justify-between gap-3">
             <div class="flex flex-col gap-1">
-              <h2 class="text-16-medium text-text-strong">Voice</h2>
+              <h2 class="text-16-medium text-text-strong">{tx("Voz", "Voice")}</h2>
               <div class="text-12-regular text-text-weak">
-                Phase: {status()?.phase ?? "idle"} | Device: {status()?.device ?? "unknown"} | Worker:{" "}
-                {status()?.worker ? "online" : "offline"}
+                {tx("Fase", "Phase")}: {phaseText()} | {tx("Dispositivo", "Device")}:{" "}
+                {status()?.device ?? tx("desconhecido", "unknown")} | {tx("Motores", "Workers")}:{" "}
+                {status()?.worker ? tx("online", "online") : tx("offline", "offline")}
+              </div>
+              <div class="text-12-regular text-text-weak">
+                STT: {status()?.engines.stt.standby ? tx("em espera", "standby") : tx("frio", "cold")} | TTS:{" "}
+                {status()?.engines.tts.standby ? tx("em espera", "standby") : tx("frio", "cold")}
+                <Show when={runtimeReady()}>
+                  <> | {tx("standby ativo", "standby active")}</>
+                </Show>
+                <Show when={activityText()}>
+                  {(value) => <> | {value()}{activity()?.progress != null ? ` ${activity()?.progress}%` : ""}</>}
+                </Show>
               </div>
               <Show when={status()?.error}>
                 {(error) => <div class="text-12-regular text-status-error-base">{error()}</div>}
@@ -574,13 +657,13 @@ export const SettingsVoice: Component = () => {
             </div>
             <div class="flex items-center gap-2">
               <Button size="small" variant="secondary" onClick={() => void ensure()} disabled={store.ensuring}>
-                {store.ensuring ? "Preparing runtime" : "Ensure runtime"}
+                {store.ensuring ? tx("Preparando runtime", "Preparing runtime") : tx("Garantir runtime", "Ensure runtime")}
               </Button>
               <Button size="small" variant="secondary" onClick={() => void ensure(true)} disabled={store.ensuring}>
-                {store.ensuring ? "Preloading" : "Preload models"}
+                {store.ensuring ? tx("Pré-carregando", "Preloading") : tx("Pré-carregar modelos", "Preload models")}
               </Button>
               <Button size="small" variant="primary" onClick={save} disabled={!dirty() || store.saving}>
-                {store.saving ? "Saving" : "Save voice"}
+                {store.saving ? tx("Salvando", "Saving") : tx("Salvar voz", "Save voice")}
               </Button>
             </div>
           </div>
@@ -588,23 +671,35 @@ export const SettingsVoice: Component = () => {
       </div>
 
       <div class="flex flex-col gap-8 max-w-[860px]">
-        <Section title="Runtime">
+        <Section title={tx("Runtime", "Runtime")}>
           <SettingsList>
-            <Row title="Enabled" description="Expose local voice features in the app.">
+            <Row title={tx("Ativado", "Enabled")} description={tx("Expõe os recursos de voz local no aplicativo.", "Expose local voice features in the app.")}>
               <Switch checked={draft.runtime.enabled} onChange={(value) => setDraft("runtime", "enabled", value)} />
             </Row>
-            <Row title="Install on demand" description="Allow the first STT/TTS call to bootstrap the local runtime automatically.">
+            <Row
+              title={tx("Instalar sob demanda", "Install on demand")}
+              description={tx(
+                "Permite que a primeira chamada de STT/TTS prepare o runtime local automaticamente.",
+                "Allow the first STT/TTS call to bootstrap the local runtime automatically.",
+              )}
+            >
               <Switch
                 checked={draft.runtime.install_on_demand}
                 onChange={(value) => setDraft("runtime", "install_on_demand", value)}
               />
             </Row>
-            <Row title="Python" description="Local Python executable used to create and manage the voice venv.">
+            <Row
+              title="Python"
+              description={tx(
+                "Executável local do Python usado para criar e gerenciar a venv de voz.",
+                "Local Python executable used to create and manage the voice venv.",
+              )}
+            >
               <div class="w-full sm:w-[320px]">
                 <TextField value={draft.runtime.python} onChange={(value) => setDraft("runtime", "python", value)} />
               </div>
             </Row>
-            <Row title="Device" description="Preferred execution backend for WhisperX and OmniVoice.">
+            <Row title={tx("Dispositivo", "Device")} description={tx("Backend preferido para WhisperX e OmniVoice.", "Preferred execution backend for WhisperX and OmniVoice.")}>
               <Select
                 options={[...devices]}
                 current={devices.find((item) => item.value === draft.runtime.device)}
@@ -616,7 +711,7 @@ export const SettingsVoice: Component = () => {
                 triggerVariant="settings"
               />
             </Row>
-            <Row title="Dtype" description="Primary torch dtype for the TTS runtime.">
+            <Row title="Dtype" description={tx("Tipo principal do torch para o runtime de TTS.", "Primary torch dtype for the TTS runtime.")}>
               <Select
                 options={[...dtypes]}
                 current={dtypes.find((item) => item.value === draft.runtime.dtype)}
@@ -628,7 +723,7 @@ export const SettingsVoice: Component = () => {
                 triggerVariant="settings"
               />
             </Row>
-            <Row title="HF token" description="Required for diarization and gated Hugging Face assets.">
+            <Row title="HF token" description={tx("Necessário para diarização e assets protegidos do Hugging Face.", "Required for diarization and gated Hugging Face assets.")}>
               <div class="w-full sm:w-[320px]">
                 <TextField
                   type="password"
@@ -640,29 +735,95 @@ export const SettingsVoice: Component = () => {
           </SettingsList>
         </Section>
 
-          <Section title="STT">
-            <SettingsList>
-              <Row title="Model" description="Choose a WhisperX model preset or type a custom model id. Preload models to download the current one now.">
+        <Section title="STT">
+          <SettingsList>
+            <Row
+              title={tx("Modelo", "Model")}
+              description={tx(
+                "Escolha um preset do WhisperX. O modelo selecionado pode ser pré-carregado agora e fica marcado quando já estiver baixado.",
+                "Choose a WhisperX model preset. The selected model can be preloaded now and is marked when already downloaded.",
+              )}
+            >
                 <div class="flex w-full flex-col gap-2 sm:w-[280px]">
                   <Select
                     options={models()}
                     current={models().find((item) => item.value === draft.stt.model)}
                     value={(item) => item.value}
                     label={(item) => item.label}
-                    onSelect={(item) => item && setDraft("stt", "model", item.value)}
+                    onSelect={(item) => {
+                      if (!item) return
+                      setStore("custom", false)
+                      setDraft("stt", "model", item.value)
+                    }}
                     variant="secondary"
                     size="small"
                     triggerVariant="settings"
                   />
-                  <TextField value={draft.stt.model} onChange={(value) => setDraft("stt", "model", value || "small")} />
+                  <div class="flex flex-wrap gap-2">
+                    <For each={modelList()}>
+                      {(item) => (
+                        <button
+                          type="button"
+                          class="rounded-full border px-2.5 py-1 text-11-medium transition-colors"
+                          classList={{
+                            "border-border-strong-base bg-surface-raised-base text-text-strong": item.active,
+                            "border-border-weak-base text-text-weak": !item.active,
+                          }}
+                          onClick={() => {
+                            setStore("custom", false)
+                            setDraft("stt", "model", item.value)
+                          }}
+                        >
+                          {item.label}
+                          <span class="ml-1 text-10-regular text-text-weak">
+                            {item.loading
+                              ? tx(`preparando ${item.progress ?? 0}%`, `loading ${item.progress ?? 0}%`)
+                              : item.downloaded
+                                ? tx("baixado", "downloaded")
+                                : tx("não baixado", "not downloaded")}
+                          </span>
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <Button size="small" variant="secondary" onClick={() => setStore("custom", !store.custom)}>
+                      {store.custom ? tx("Fechar modelo customizado", "Hide custom model") : tx("Usar modelo customizado", "Use custom model")}
+                    </Button>
+                    <span class="text-12-regular text-text-weak">
+                      {modelMap().get(draft.stt.model)?.loading ? `${activityText() ?? ""}${modelMap().get(draft.stt.model)?.progress != null ? ` ${modelMap().get(draft.stt.model)?.progress}%` : ""}`.trim() : ""}
+                    </span>
+                  </div>
+                  <Show when={customModel()}>
+                    <TextField
+                      value={draft.stt.model}
+                      placeholder={tx("Digite o id do modelo", "Type the model id")}
+                      onChange={(value) => setDraft("stt", "model", value || "small")}
+                    />
+                  </Show>
                 </div>
-              </Row>
-            <Row title="Language" description="Use auto for language detection or set a fixed language code.">
+            </Row>
+            <Row
+              title={tx("Idioma", "Language")}
+              description={tx(
+                "Use automático para detecção de idioma ou fixe um código para acelerar a transcrição.",
+                "Use auto for language detection or set a fixed language code.",
+              )}
+            >
               <div class="w-full sm:w-[180px]">
-                <TextField value={draft.stt.language} onChange={(value) => setDraft("stt", "language", value || "auto")} />
+                <Select
+                  options={[...sttlangs]}
+                  current={sttlangs.find((item) => item.value === draft.stt.language) ?? sttlangs[0]}
+                  value={(item) => item.value}
+                  label={(item) => item.label}
+                  onSelect={(item) => item && setDraft("stt", "language", item.value)}
+                  variant="secondary"
+                  size="small"
+                  triggerVariant="settings"
+                />
               </div>
             </Row>
-            <Row title="Timestamps" description="Choose the timestamp resolution returned by WhisperX.">
+            <Row title={tx("Timestamps", "Timestamps")} description={tx("Escolha a resolução temporal retornada pelo WhisperX.", "Choose the timestamp resolution returned by WhisperX.")}>
               <Select
                 options={[...stamps]}
                 current={stamps.find((item) => item.value === draft.stt.timestamps)}
@@ -674,7 +835,7 @@ export const SettingsVoice: Component = () => {
                 triggerVariant="settings"
               />
             </Row>
-            <Row title="Compute type" description="WhisperX compute type for inference.">
+            <Row title={tx("Tipo de computação", "Compute type")} description={tx("Tipo de computação usado pelo WhisperX na inferência.", "WhisperX compute type for inference.")}>
               <Select
                 options={ctypes}
                 current={ctypes.find((item) => item.value === draft.stt.compute_type)}
@@ -686,13 +847,13 @@ export const SettingsVoice: Component = () => {
                 triggerVariant="settings"
               />
             </Row>
-            <Row title="Diarization" description="Assign speaker labels when a valid Hugging Face token is configured.">
+            <Row title={tx("Diarização", "Diarization")} description={tx("Atribui rótulos de falante quando houver um token válido do Hugging Face.", "Assign speaker labels when a valid Hugging Face token is configured.")}>
               <Switch checked={draft.stt.diarization} onChange={(value) => setDraft("stt", "diarization", value)} />
             </Row>
-            <Row title="VAD" description="Run voice activity detection before transcription.">
+            <Row title="VAD" description={tx("Executa detecção de atividade de voz antes da transcrição.", "Run voice activity detection before transcription.")}>
               <Switch checked={draft.stt.vad} onChange={(value) => setDraft("stt", "vad", value)} />
             </Row>
-            <Row title="Batch size" description="Transcription batch size. Higher values use more memory.">
+            <Row title={tx("Tamanho do lote", "Batch size")} description={tx("Tamanho do lote da transcrição. Valores maiores usam mais memória.", "Transcription batch size. Higher values use more memory.")}>
               <div class="w-full sm:w-[120px]">
                 <TextField
                   type="number"
@@ -701,7 +862,7 @@ export const SettingsVoice: Component = () => {
                 />
               </div>
             </Row>
-            <Row title="Beam size" description="Beam width for WhisperX decoding.">
+            <Row title={tx("Largura do beam", "Beam size")} description={tx("Largura do beam usada na decodificação do WhisperX.", "Beam width for WhisperX decoding.")}>
               <div class="w-full sm:w-[120px]">
                 <TextField
                   type="number"
@@ -715,19 +876,19 @@ export const SettingsVoice: Component = () => {
 
         <Section title="TTS">
           <SettingsList>
-            <Row title="Live playback" description="Synthesize assistant text while the answer is still streaming.">
+            <Row title={tx("Fala em tempo real", "Live playback")} description={tx("Sintetiza o texto do assistente enquanto a resposta ainda está chegando.", "Synthesize assistant text while the answer is still streaming.")}>
               <Switch checked={draft.tts.live} onChange={(value) => setDraft("tts", "live", value)} />
             </Row>
-            <Row title="Autoplay" description="Play synthesized assistant audio automatically.">
+            <Row title={tx("Reprodução automática", "Autoplay")} description={tx("Reproduz automaticamente o áudio sintetizado do assistente.", "Play synthesized assistant audio automatically.")}>
               <Switch checked={draft.tts.autoplay} onChange={(value) => setDraft("tts", "autoplay", value)} />
             </Row>
-            <Row title="Stop on interrupt" description="Cancel queued assistant audio when a new interruption arrives.">
+            <Row title={tx("Parar ao interromper", "Stop on interrupt")} description={tx("Cancela o áudio enfileirado do assistente quando chegar uma nova interrupção.", "Cancel queued assistant audio when a new interruption arrives.")}>
               <Switch checked={draft.tts.stop_on_interrupt} onChange={(value) => setDraft("tts", "stop_on_interrupt", value)} />
             </Row>
-            <Row title="Strip markdown" description="Normalize markdown-heavy assistant text before synthesis.">
+            <Row title={tx("Limpar markdown", "Strip markdown")} description={tx("Normaliza textos com muito markdown antes da síntese.", "Normalize markdown-heavy assistant text before synthesis.")}>
               <Switch checked={draft.tts.strip_markdown} onChange={(value) => setDraft("tts", "strip_markdown", value)} />
             </Row>
-            <Row title="Chunking" description="Chunking strategy for live playback.">
+            <Row title={tx("Chunking", "Chunking")} description={tx("Estratégia de divisão usada na fala em tempo real.", "Chunking strategy for live playback.")}>
               <Select
                 options={[...chunk]}
                 current={chunk[0]}
@@ -739,7 +900,7 @@ export const SettingsVoice: Component = () => {
                 triggerVariant="settings"
               />
             </Row>
-            <Row title="Default speed" description="Default speech speed passed to OmniVoice.">
+            <Row title={tx("Velocidade padrão", "Default speed")} description={tx("Velocidade padrão de fala enviada ao OmniVoice.", "Default speech speed passed to OmniVoice.")}>
               <div class="w-full sm:w-[120px]">
                 <TextField
                   type="number"
@@ -748,7 +909,7 @@ export const SettingsVoice: Component = () => {
                 />
               </div>
             </Row>
-            <Row title="Default duration" description="Optional duration hint for synthesis.">
+            <Row title={tx("Duração padrão", "Default duration")} description={tx("Dica opcional de duração para a síntese.", "Optional duration hint for synthesis.")}>
               <div class="w-full sm:w-[120px]">
                 <TextField
                   type="number"
@@ -757,7 +918,7 @@ export const SettingsVoice: Component = () => {
                 />
               </div>
             </Row>
-            <Row title="Diffusion steps" description="OmniVoice diffusion steps for generation quality and latency.">
+            <Row title={tx("Passos de difusão", "Diffusion steps")} description={tx("Passos de difusão do OmniVoice para balancear qualidade e latência.", "OmniVoice diffusion steps for generation quality and latency.")}>
               <div class="w-full sm:w-[120px]">
                 <TextField
                   type="number"
@@ -766,7 +927,7 @@ export const SettingsVoice: Component = () => {
                 />
               </div>
             </Row>
-            <Row title="Default preset" description="Preset used for assistant playback and ad hoc synthesis.">
+            <Row title={tx("Preset padrão", "Default preset")} description={tx("Preset usado na fala do assistente e em sínteses avulsas.", "Preset used for assistant playback and ad hoc synthesis.")}>
               <Select
                 options={draft.tts.presets}
                 current={draft.tts.presets.find((item) => item.id === draft.tts.default_preset)}
@@ -776,15 +937,15 @@ export const SettingsVoice: Component = () => {
                 variant="secondary"
                 size="small"
                 triggerVariant="settings"
-                placeholder="None"
+                placeholder={tx("Nenhum", "None")}
               />
             </Row>
           </SettingsList>
         </Section>
 
-        <Section title="Presets">
+        <Section title={tx("Presets", "Presets")}>
           <SettingsList>
-            <Row title="Preset" description="Select which OmniVoice preset to edit.">
+            <Row title={tx("Preset", "Preset")} description={tx("Selecione qual preset do OmniVoice você quer editar.", "Select which OmniVoice preset to edit.")}>
               <div class="flex items-center gap-2">
                 <Select
                   options={draft.tts.presets}
@@ -795,30 +956,30 @@ export const SettingsVoice: Component = () => {
                   variant="secondary"
                   size="small"
                   triggerVariant="settings"
-                  placeholder="No presets"
+                  placeholder={tx("Sem presets", "No presets")}
                 />
                 <Button size="small" variant="secondary" onClick={addPreset}>
-                  Add
+                  {tx("Adicionar", "Add")}
                 </Button>
                 <Button size="small" variant="ghost" onClick={removePreset} disabled={!preset()}>
-                  Remove
+                  {tx("Remover", "Remove")}
                 </Button>
               </div>
             </Row>
             <Show when={preset()}>
               {(item) => (
                 <>
-                  <Row title="Preset ID" description="Stable identifier saved in server config.">
+                  <Row title="Preset ID" description={tx("Identificador estável salvo na configuração do servidor.", "Stable identifier saved in server config.")}>
                     <div class="w-full sm:w-[220px]">
                       <TextField value={item().id} onChange={(value) => patchPreset("id", value)} />
                     </div>
                   </Row>
-                  <Row title="Name" description="Human-friendly name shown in settings and playback config.">
+                  <Row title={tx("Nome", "Name")} description={tx("Nome amigável exibido nas configurações e no playback.", "Human-friendly name shown in settings and playback config.")}>
                     <div class="w-full sm:w-[220px]">
                       <TextField value={item().name} onChange={(value) => patchPreset("name", value)} />
                     </div>
                   </Row>
-                  <Row title="Mode" description="Auto, voice clone, or design preset mode.">
+                  <Row title={tx("Modo", "Mode")} description={tx("Modo automático, clonagem de voz ou design de voz.", "Auto, voice clone, or design preset mode.")}>
                     <Select
                       options={[...modes]}
                       current={modes.find((entry) => entry.value === item().mode)}
@@ -830,20 +991,24 @@ export const SettingsVoice: Component = () => {
                       triggerVariant="settings"
                     />
                   </Row>
-                  <Row title="Use as default" description="Make this preset the default voice for assistant playback and ad hoc synthesis.">
+                  <Row title={tx("Usar como padrão", "Use as default")} description={tx("Define este preset como voz padrão do assistente.", "Make this preset the default voice for assistant playback and ad hoc synthesis.")}>
                     <Button size="small" variant="secondary" onClick={() => setDraft("tts", "default_preset", item().id)}>
-                      {draft.tts.default_preset === item().id ? "Default preset" : "Set as default"}
+                      {draft.tts.default_preset === item().id ? tx("Preset padrão", "Default preset") : tx("Definir como padrão", "Set as default")}
                     </Button>
                   </Row>
                   <Show when={clone()}>
-                    <Row title="Reference audio" description="Record 3 to 10 seconds here to clone this voice directly in OpenCode.">
+                    <Row title={tx("Áudio de referência", "Reference audio")} description={tx("Grave de 3 a 10 segundos aqui para clonar esta voz direto no OpenCode.", "Record 3 to 10 seconds here to clone this voice directly in OpenCode.")}>
                       <div class="w-full sm:w-[420px]">
                         <AudioCard
                           src={ref.audio}
                           name={ref.name || leaf(item().ref_audio_path) || `${item().name}.wav`}
                           ms={capture.duration_ms}
                           busy={capture.mode === "preparing" || capture.mode === "saving"}
-                          empty={ref.loading ? "Loading saved reference audio..." : "Record a short reference clip to clone this voice."}
+                          empty={
+                            ref.loading
+                              ? tx("Carregando o áudio de referência salvo...", "Loading saved reference audio...")
+                              : tx("Grave um trecho curto de referência para clonar esta voz.", "Record a short reference clip to clone this voice.")
+                          }
                           note={
                             ref.error ||
                             `${capture.status}${capture.duration_ms > 0 ? ` ${Math.round(capture.duration_ms / 1000)}s` : ""}${
@@ -856,7 +1021,7 @@ export const SettingsVoice: Component = () => {
                                 size="small"
                                 variant="ghost"
                                 icon={capture.mode === "recording" ? "stop" : "mic"}
-                                aria-label={capture.mode === "recording" ? "Stop recording" : "Record reference"}
+                                aria-label={capture.mode === "recording" ? tx("Parar gravação", "Stop recording") : tx("Gravar referência", "Record reference")}
                                 onClick={capture.mode === "recording" ? stopCapture : startCapture}
                                 disabled={capture.mode === "preparing" || capture.mode === "saving"}
                               />
@@ -864,7 +1029,7 @@ export const SettingsVoice: Component = () => {
                                 size="small"
                                 variant="ghost"
                                 icon="trash"
-                                aria-label="Clear reference"
+                                aria-label={tx("Limpar referência", "Clear reference")}
                                 onClick={clearCapture}
                                 disabled={!item().ref_audio_path && !ref.audio}
                               />
@@ -873,7 +1038,7 @@ export const SettingsVoice: Component = () => {
                         />
                       </div>
                     </Row>
-                    <Row title="Reference text" description="Transcript used with the cloned voice.">
+                    <Row title={tx("Texto de referência", "Reference text")} description={tx("Transcrição usada junto da voz clonada.", "Transcript used with the cloned voice.")}>
                       <div class="w-full sm:w-[420px]">
                         <TextField
                           multiline
@@ -886,8 +1051,8 @@ export const SettingsVoice: Component = () => {
                   <Show when={!clone()}>
                     <>
                       <Row
-                        title="Instruction"
-                        description="Optional extra OmniVoice guidance layered on top of the design controls."
+                        title={tx("Instrução", "Instruction")}
+                        description={tx("Orientação extra opcional do OmniVoice somada aos controles de design.", "Optional extra OmniVoice guidance layered on top of the design controls.")}
                       >
                         <div class="w-full sm:w-[320px]">
                           <TextField
@@ -899,7 +1064,7 @@ export const SettingsVoice: Component = () => {
                       </Row>
                       <Show when={design()}>
                         <>
-                          <Row title="Gender" description="Structured voice design hint folded into the OmniVoice instruction.">
+                          <Row title={tx("Gênero", "Gender")} description={tx("Dica estruturada de design de voz incorporada à instrução do OmniVoice.", "Structured voice design hint folded into the OmniVoice instruction.")}>
                             <Select
                               options={[...genders]}
                               current={genders.find((entry) => entry.value === (item().design?.gender ?? "")) ?? genders[0]}
@@ -911,7 +1076,7 @@ export const SettingsVoice: Component = () => {
                               triggerVariant="settings"
                             />
                           </Row>
-                          <Row title="Age" description="Structured age hint for voice design mode.">
+                          <Row title={tx("Idade", "Age")} description={tx("Dica estruturada de idade para o modo design de voz.", "Structured age hint for voice design mode.")}>
                             <Select
                               options={[...ages]}
                               current={ages.find((entry) => entry.value === (item().design?.age ?? "")) ?? ages[0]}
@@ -923,7 +1088,7 @@ export const SettingsVoice: Component = () => {
                               triggerVariant="settings"
                             />
                           </Row>
-                          <Row title="Pitch" description="Structured pitch hint for voice design mode.">
+                          <Row title={tx("Tom", "Pitch")} description={tx("Dica estruturada de tom para o modo design de voz.", "Structured pitch hint for voice design mode.")}>
                             <Select
                               options={[...pitches]}
                               current={pitches.find((entry) => entry.value === (item().design?.pitch ?? "")) ?? pitches[0]}
@@ -935,7 +1100,7 @@ export const SettingsVoice: Component = () => {
                               triggerVariant="settings"
                             />
                           </Row>
-                          <Row title="Style" description="Structured style hint for voice design mode.">
+                          <Row title={tx("Estilo", "Style")} description={tx("Dica estruturada de estilo para o modo design de voz.", "Structured style hint for voice design mode.")}>
                             <Select
                               options={[...styles]}
                               current={styles.find((entry) => entry.value === (item().design?.style ?? "")) ?? styles[0]}
@@ -949,7 +1114,7 @@ export const SettingsVoice: Component = () => {
                           </Row>
                         </>
                       </Show>
-                      <Row title="Tags" description={`Comma-separated OmniVoice tags. Supported: ${voiceTags.join(", ")}`}>
+                      <Row title={tx("Tags", "Tags")} description={tx(`Tags do OmniVoice separadas por vírgula. Suportadas: ${voiceTags.join(", ")}`, `Comma-separated OmniVoice tags. Supported: ${voiceTags.join(", ")}`)}>
                         <div class="w-full sm:w-[320px]">
                           <TextField
                             value={inputs.tags}
@@ -967,8 +1132,8 @@ export const SettingsVoice: Component = () => {
                         </div>
                       </Row>
                       <Row
-                        title="Resolved instruction"
-                        description="Effective OmniVoice instruction after combining structured design controls and freeform instruction."
+                        title={tx("Instrução resolvida", "Resolved instruction")}
+                        description={tx("Instrução final do OmniVoice após combinar controles estruturados e texto livre.", "Effective OmniVoice instruction after combining structured design controls and freeform instruction.")}
                       >
                         <div class="w-full sm:w-[320px]">
                           <TextField
@@ -978,7 +1143,7 @@ export const SettingsVoice: Component = () => {
                           />
                         </div>
                       </Row>
-                      <Row title="Language" description="Optional language id passed to OmniVoice.">
+                      <Row title={tx("Idioma", "Language")} description={tx("Identificador opcional de idioma enviado ao OmniVoice.", "Optional language id passed to OmniVoice.")}>
                         <div class="w-full sm:w-[180px]">
                           <TextField
                             value={item().language ?? ""}
@@ -986,7 +1151,7 @@ export const SettingsVoice: Component = () => {
                           />
                         </div>
                       </Row>
-                      <Row title="Speed override" description="Optional speed override for this preset only.">
+                      <Row title={tx("Sobrescrever velocidade", "Speed override")} description={tx("Velocidade opcional só para este preset.", "Optional speed override for this preset only.")}>
                         <div class="w-full sm:w-[120px]">
                           <TextField
                             type="number"
@@ -999,7 +1164,7 @@ export const SettingsVoice: Component = () => {
                       </Row>
                     </>
                   </Show>
-                  <Row title="Preview text" description="Quickly validate the selected OmniVoice preset without leaving Settings.">
+                  <Row title={tx("Texto da prévia", "Preview text")} description={tx("Valide rapidamente o preset selecionado sem sair das configurações.", "Quickly validate the selected OmniVoice preset without leaving Settings.")}>
                     <div class="flex w-full flex-col gap-3 sm:w-[420px]">
                       <TextField multiline value={preview.text} onChange={(value) => setPreview("text", value)} />
                       <div class="flex items-center gap-2">
@@ -1009,7 +1174,7 @@ export const SettingsVoice: Component = () => {
                           onClick={previewVoice}
                           disabled={preview.busy || (clone() && !item().ref_audio_path)}
                         >
-                          {preview.busy ? "Synthesizing" : "Synthesize preview"}
+                          {preview.busy ? tx("Sintetizando", "Synthesizing") : tx("Sintetizar prévia", "Synthesize preview")}
                         </Button>
                         <span class="text-12-regular text-text-weak">{preview.status}</span>
                       </div>
@@ -1017,7 +1182,7 @@ export const SettingsVoice: Component = () => {
                         src={preview.audio}
                         name={`${item().name || "preview"}.wav`}
                         busy={preview.busy}
-                        empty="Synthesize a preview to hear the current preset."
+                        empty={tx("Sintetize uma prévia para ouvir o preset atual.", "Synthesize a preview to hear the current preset.")}
                         note={preview.status}
                       />
                     </div>
@@ -1028,12 +1193,12 @@ export const SettingsVoice: Component = () => {
           </SettingsList>
         </Section>
 
-        <Section title="Playback">
+        <Section title={tx("Playback", "Playback")}>
           <SettingsList>
-            <Row title="Mute" description="Mute assistant playback without disabling synthesis.">
+            <Row title={tx("Mudo", "Mute")} description={tx("Silencia a fala do assistente sem desabilitar a síntese.", "Mute assistant playback without disabling synthesis.")}>
               <Switch checked={settings.voice.mute()} onChange={(value) => settings.voice.setMute(value)} />
             </Row>
-            <Row title="Volume" description="Local playback gain for synthesized assistant audio.">
+            <Row title={tx("Volume", "Volume")} description={tx("Ganho local de reprodução do áudio sintetizado.", "Local playback gain for synthesized assistant audio.")}>
               <div class="flex items-center gap-3 w-full sm:w-[220px]">
                 <input
                   class="w-full"
@@ -1049,7 +1214,7 @@ export const SettingsVoice: Component = () => {
                 </span>
               </div>
             </Row>
-            <Row title="Input device" description="Preferred recording device for the prompt microphone button.">
+            <Row title={tx("Dispositivo de entrada", "Input device")} description={tx("Dispositivo preferido de gravação para o botão de microfone do prompt.", "Preferred recording device for the prompt microphone button.")}>
               <Select
                 options={audio()}
                 current={audio().find((item) => item.value === settings.voice.device())}
@@ -1061,7 +1226,7 @@ export const SettingsVoice: Component = () => {
                 triggerVariant="settings"
               />
             </Row>
-            <Row title="Show timings" description="Keep detailed timing data visible for debugging and future karaoke-style tools.">
+            <Row title={tx("Mostrar timings", "Show timings")} description={tx("Mantém os dados detalhados de tempo visíveis para debug e ferramentas futuras.", "Keep detailed timing data visible for debugging and future karaoke-style tools.")}>
               <Switch checked={settings.voice.timings()} onChange={(value) => settings.voice.setTimings(value)} />
             </Row>
           </SettingsList>
@@ -1203,7 +1368,7 @@ function AudioCard(props: {
               -5s
             </Button>
             <Button size="small" variant="secondary" onClick={toggle} disabled={!props.src || props.busy}>
-              {state.playing ? "Pause" : "Play"}
+              {state.playing ? "Pausar" : "Reproduzir"}
             </Button>
             <Button size="small" variant="secondary" onClick={() => step(5)} disabled={!props.src}>
               +5s
@@ -1218,7 +1383,7 @@ function AudioCard(props: {
       </div>
       <div class="flex items-center justify-between gap-2">
         <div class="min-w-0 flex-1">
-          <div class="truncate text-12-medium text-text-strong">{props.name || "Voice clip"}</div>
+          <div class="truncate text-12-medium text-text-strong">{props.name || "Clipe de voz"}</div>
           <div class="text-12-regular text-text-weak">{props.note || props.empty}</div>
         </div>
         <div class="flex items-center gap-1">
@@ -1227,7 +1392,7 @@ function AudioCard(props: {
               size="small"
               variant="ghost"
               icon="download"
-              aria-label="Download audio"
+              aria-label="Baixar áudio"
               onClick={() => props.src && saveAudio(props.src, props.name || "voice.wav")}
             />
           </Show>
