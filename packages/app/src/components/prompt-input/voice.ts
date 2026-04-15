@@ -10,6 +10,13 @@ type Recorder = {
   cancel: () => Promise<void>
 }
 
+type Stream = {
+  stop: () => Promise<void>
+  cancel: () => Promise<void>
+  snapshot: () => Promise<{ audio: string; duration_ms: number; peak: number } | undefined>
+  cut: () => Promise<{ audio: string; duration_ms: number; peak: number } | undefined>
+}
+
 function base64(input: Uint8Array) {
   let text = ""
   for (let idx = 0; idx < input.length; idx += 0x8000) {
@@ -155,28 +162,55 @@ function encodeWav(input: Float32Array[], rate: number) {
   return new Uint8Array(buf)
 }
 
-export async function startPromptRecording(input?: { device?: string }): Promise<Recorder> {
+function encodeClip(input: { list: Float32Array[]; rate: number; peak: number }) {
+  const size = input.list.reduce((sum, item) => sum + item.length, 0)
+  if (!size) return
+  const wav = encodeWav(input.list, input.rate)
+  return {
+    audio: `data:audio/wav;base64,${base64(wav)}`,
+    duration_ms: Math.round((size / input.rate) * 1000),
+    peak: input.peak,
+  }
+}
+
+export async function startVoiceStream(input?: {
+  device?: string
+  onFrame?: (input: { peak: number; rms: number; duration_ms: number; chunk_ms: number }) => void
+}): Promise<Stream> {
   const media = navigator.mediaDevices
   if (!media?.getUserMedia) throw new Error("Microphone capture is unavailable")
 
   const stream = await media.getUserMedia({
     audio: input?.device ? { deviceId: { exact: input.device } } : true,
   })
-  const ctx = new AudioContext()
+  const ctx = new AudioContext({ latencyHint: "interactive" })
   const src = ctx.createMediaStreamSource(stream)
   const gain = ctx.createGain()
-  const node = ctx.createScriptProcessor(4096, 1, 1)
-  const chunks: Float32Array[] = []
+  const node = ctx.createScriptProcessor(2048, 1, 1)
+  let list: Float32Array[] = []
+  let size = 0
   let peak = 0
   let closed = false
 
   gain.gain.value = 0
   node.onaudioprocess = (event) => {
     const data = new Float32Array(event.inputBuffer.getChannelData(0))
-    chunks.push(data)
+    list.push(data)
+    size += data.length
+    let rms = 0
+    let top = 0
     for (let idx = 0; idx < data.length; idx += 1) {
-      peak = Math.max(peak, Math.abs(data[idx] ?? 0))
+      const value = Math.abs(data[idx] ?? 0)
+      top = Math.max(top, value)
+      rms += value * value
     }
+    peak = Math.max(peak, top)
+    input?.onFrame?.({
+      peak: top,
+      rms: Math.sqrt(rms / Math.max(1, data.length)),
+      duration_ms: Math.round((size / ctx.sampleRate) * 1000),
+      chunk_ms: Math.round((data.length / ctx.sampleRate) * 1000),
+    })
   }
 
   src.connect(node)
@@ -184,6 +218,12 @@ export async function startPromptRecording(input?: { device?: string }): Promise
   gain.connect(ctx.destination)
   await ctx.resume()
   if (ctx.state !== "running") throw new Error("Microphone capture could not start")
+
+  const clear = () => {
+    list = []
+    size = 0
+    peak = 0
+  }
 
   const shutdown = async () => {
     if (closed) return
@@ -198,15 +238,46 @@ export async function startPromptRecording(input?: { device?: string }): Promise
   return {
     async stop() {
       await shutdown()
-      const wav = encodeWav(chunks, ctx.sampleRate)
-      return {
-        audio: `data:audio/wav;base64,${base64(wav)}`,
-        duration_ms: Math.round((chunks.reduce((sum, item) => sum + item.length, 0) / ctx.sampleRate) * 1000),
+    },
+    async cancel() {
+      clear()
+      await shutdown()
+    },
+    async snapshot() {
+      return encodeClip({
+        list: list.slice(),
+        rate: ctx.sampleRate,
         peak,
+      })
+    },
+    async cut() {
+      const out = encodeClip({
+        list,
+        rate: ctx.sampleRate,
+        peak,
+      })
+      clear()
+      return out
+    },
+  }
+}
+
+export async function startPromptRecording(input?: { device?: string }): Promise<Recorder> {
+  const stream = await startVoiceStream(input)
+
+  return {
+    async stop() {
+      const out = await stream.snapshot()
+      await stream.stop()
+      if (out) return out
+      return {
+        audio: `data:audio/wav;base64,${base64(encodeWav([], 24000))}`,
+        duration_ms: 0,
+        peak: 0,
       }
     },
     async cancel() {
-      await shutdown()
+      await stream.cancel()
     },
   }
 }

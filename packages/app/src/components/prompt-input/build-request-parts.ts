@@ -24,6 +24,11 @@ type BuildRequestPartsInput = {
   context: ContextFile[]
   images: ImageAttachmentPart[]
   text: string
+  hidden?: {
+    text: string
+    synthetic?: boolean
+    ignored?: boolean
+  }[]
   messageID: string
   sessionID: string
   sessionDirectory: string
@@ -90,6 +95,13 @@ const toOptimisticPart = (part: PromptRequestPart, sessionID: string, messageID:
 
 export function buildRequestParts(input: BuildRequestPartsInput) {
   const requestParts: PromptRequestPart[] = [
+    ...(input.hidden ?? []).map((item) => ({
+      id: Identifier.ascending("part"),
+      type: "text" as const,
+      text: item.text,
+      synthetic: item.synthetic,
+      ignored: item.ignored,
+    })),
     {
       id: Identifier.ascending("part"),
       type: "text",

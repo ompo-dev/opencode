@@ -46,6 +46,7 @@ export interface Settings {
     volume: number
     device: string
     timings: boolean
+    mode: "dictation" | "call"
   }
 }
 
@@ -129,6 +130,7 @@ const defaultSettings: Settings = {
     volume: 1,
     device: "",
     timings: false,
+    mode: "dictation",
   },
 }
 
@@ -298,6 +300,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         timings: withFallback(() => store.voice?.timings, defaultSettings.voice.timings),
         setTimings(value: boolean) {
           setStore("voice", "timings", value)
+        },
+        mode: withFallback(() => store.voice?.mode, defaultSettings.voice.mode),
+        setMode(value: "dictation" | "call") {
+          setStore("voice", "mode", value)
         },
       },
     }

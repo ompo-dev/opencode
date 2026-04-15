@@ -408,43 +408,68 @@ function createGlobalSync() {
     if (globalStore.config.voice?.runtime?.enabled === false) return
 
     let dead = false
-    let run = false
-    const tick = async () => {
-      if (run) return
-      run = true
+    let busy = false
+    let sttWarm: ReturnType<typeof setTimeout> | undefined
+    let ttsWarm: ReturnType<typeof setTimeout> | undefined
+    let sttKeep: ReturnType<typeof setInterval> | undefined
+    let ttsKeep: ReturnType<typeof setInterval> | undefined
+    let idle: number | undefined
+    const visible = () => typeof document === "undefined" || document.visibilityState === "visible"
+    const run = async (target: "stt" | "tts") => {
+      if (dead || busy || !visible()) return
+      busy = true
       try {
         const res = await globalSDK.client.global.voice.status().catch(() => undefined)
         const out = res?.data
-        if (!out || dead) return
-        if (out.engines.stt.installed) {
-          await globalSDK.client.global.voice.ensure({
+        if (!out || dead || out.activity.target) return
+        const engine = out.engines[target]
+        if (!engine.installed || engine.warmed) return
+        await globalSDK.client.global.voice
+          .ensure({
             voiceEnsureInput: {
-              target: "stt",
+              target,
               preload: true,
             },
-          }).catch(() => undefined)
-        }
-        if (out.engines.tts.installed) {
-          await globalSDK.client.global.voice.ensure({
-            voiceEnsureInput: {
-              target: "tts",
-              preload: true,
-            },
-          }).catch(() => undefined)
-        }
+          })
+          .catch(() => undefined)
       } finally {
-        run = false
+        busy = false
       }
     }
+    const warm = (target: "stt" | "tts") => {
+      if (dead || !visible()) return
+      if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+        idle = window.requestIdleCallback(() => {
+          idle = undefined
+          void run(target)
+        }, { timeout: 4000 })
+        return
+      }
+      void run(target)
+    }
 
-    void tick()
-    const id = setInterval(() => {
-      void tick()
-    }, 4 * 60 * 1000)
+    ttsWarm = setTimeout(() => {
+      warm("tts")
+    }, 4_000)
+    sttWarm = setTimeout(() => {
+      warm("stt")
+    }, 12_000)
+    sttKeep = setInterval(() => {
+      warm("stt")
+    }, 12 * 60 * 1000)
+    ttsKeep = setInterval(() => {
+      warm("tts")
+    }, 12 * 60 * 1000)
 
     onCleanup(() => {
       dead = true
-      clearInterval(id)
+      if (sttWarm !== undefined) clearTimeout(sttWarm)
+      if (ttsWarm !== undefined) clearTimeout(ttsWarm)
+      if (sttKeep !== undefined) clearInterval(sttKeep)
+      if (ttsKeep !== undefined) clearInterval(ttsKeep)
+      if (idle !== undefined && typeof window !== "undefined" && "cancelIdleCallback" in window) {
+        window.cancelIdleCallback(idle)
+      }
     })
   })
 

@@ -107,6 +107,8 @@ export function Select<T>(props: SelectProps<T> & Omit<ButtonProps, "children">)
             ...(local.classList ?? {}),
             [local.class ?? ""]: !!local.class,
           }}
+          onMouseDown={(event) => event.preventDefault()}
+          onPointerDown={(event) => event.stopPropagation()}
           onPointerEnter={() => move(itemProps.item.rawValue)}
           onPointerMove={() => move(itemProps.item.rawValue)}
           onFocus={() => move(itemProps.item.rawValue)}

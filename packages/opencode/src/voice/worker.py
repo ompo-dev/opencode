@@ -19,6 +19,7 @@ ENGINE = os.environ.get("OPENCODE_VOICE_ENGINE") or None
 
 state = {
     "stt": None,
+    "stt_key": None,
     "align": {},
     "tts": None,
     "device": None,
@@ -89,11 +90,24 @@ def active(kind):
 
 def ensure_stt(cfg):
     active("stt")
-    if state["stt"] is not None:
+    dev = device(cfg)
+    key = json.dumps(
+        {
+            "model": cfg["stt"]["model"],
+            "device": dev,
+            "compute_type": cfg["stt"]["compute_type"],
+            "beam_size": cfg["stt"]["beam_size"],
+        },
+        sort_keys=True,
+    )
+    if state["stt"] is not None and state["stt_key"] == key:
         return state["stt"]
     import whisperx
 
-    dev = device(cfg)
+    state["stt"] = None
+    state["stt_key"] = None
+    state["align"] = {}
+    clear()
     state["device"] = dev
     model = whisperx.load_model(
         cfg["stt"]["model"],
@@ -106,6 +120,7 @@ def ensure_stt(cfg):
         vad_method="silero",
     )
     state["stt"] = model
+    state["stt_key"] = key
     return model
 
 
@@ -138,6 +153,42 @@ def ensure_tts(cfg):
     )
     state["tts"] = model
     return model
+
+
+def prime_stt(cfg):
+    model = ensure_stt(cfg)
+    try:
+        import numpy as np
+
+        audio = np.zeros(16000, dtype="float32")
+        model.transcribe(
+            audio,
+            batch_size=1,
+            language=None if cfg["stt"]["language"] == "auto" else cfg["stt"]["language"],
+        )
+    except Exception:
+        pass
+    lang = cfg["stt"].get("language")
+    if not lang or lang == "auto":
+        return
+    try:
+        ensure_align(cfg, lang)
+    except Exception:
+        pass
+
+
+def prime_tts(cfg):
+    model = ensure_tts(cfg)
+    try:
+        audio = model.generate(
+            text="Oi.",
+            num_step=max(4, min(8, cfg["tts"].get("call_num_step") or cfg["tts"].get("num_step") or 8)),
+            speed=cfg["tts"].get("call_speed") or cfg["tts"].get("speed") or 1.0,
+        )
+        wave = audio[0] if isinstance(audio, list) else audio
+        len(wave)
+    except Exception:
+        pass
 
 
 def load_json(stdin):
@@ -306,9 +357,9 @@ def main():
                 }
             elif cmd == "warm":
                 if req["input"].get("stt"):
-                    ensure_stt(cfg)
+                    prime_stt(cfg)
                 if req["input"].get("tts"):
-                    ensure_tts(cfg)
+                    prime_tts(cfg)
                 out = {
                     "active_engine": state["active"],
                     "device": state["device"],

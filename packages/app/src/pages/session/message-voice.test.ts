@@ -8,6 +8,19 @@ const tick = async (count = 6) => {
   }
 }
 
+const queue = (list: string[]) => ({
+  enqueue: (src: string) => list.push(src),
+  clear: () => undefined,
+  update: () => undefined,
+  state: () => ({
+    state: (list.length ? "loading" : "idle") as "idle" | "loading",
+    pending: list.length,
+    mode: "htmlaudio" as const,
+    muted: false,
+    volume: 1,
+  }),
+})
+
 describe("joinVoiceText", () => {
   test("skips synthetic and ignored text parts", () => {
     const parts = [
@@ -28,11 +41,7 @@ describe("createVoiceCtrl", () => {
       enabled: () => true,
       strip: () => true,
       synth: async (text) => `audio:${text}`,
-      queue: {
-        enqueue: (src) => list.push(src),
-        clear: () => undefined,
-        update: () => undefined,
-      },
+      queue: queue(list),
     })
 
     ctrl.sync({ msg: "m1", text: "One\nTwo" })
@@ -52,11 +61,7 @@ describe("createVoiceCtrl", () => {
         new Promise((resolve) => {
           hold.push({ text, resolve })
         }),
-      queue: {
-        enqueue: (src) => list.push(src),
-        clear: () => undefined,
-        update: () => undefined,
-      },
+      queue: queue(list),
     })
 
     ctrl.sync({ msg: "m1", text: "First\nnext" })
@@ -78,11 +83,7 @@ describe("createVoiceCtrl", () => {
       enabled: () => true,
       strip: () => true,
       synth: async (text) => `audio:${text}`,
-      queue: {
-        enqueue: (src) => list.push(src),
-        clear: () => undefined,
-        update: () => undefined,
-      },
+      queue: queue(list),
     })
 
     ctrl.sync({ msg: "m1", text: "alpha" })
@@ -104,11 +105,7 @@ describe("createVoiceCtrl", () => {
         new Promise((resolve) => {
           hold.push({ text, resolve })
         }),
-      queue: {
-        enqueue: (src) => list.push(src),
-        clear: () => undefined,
-        update: () => undefined,
-      },
+      queue: queue(list),
     })
 
     ctrl.sync({ msg: "m1", text: "One\n" })
@@ -131,5 +128,69 @@ describe("createVoiceCtrl", () => {
     hold[2]?.resolve("audio:Three")
     await tick(10)
     expect(list).toEqual(["audio:One", "audio:Two", "audio:Three"])
+  })
+
+  test("streams sentence chunks before the full message completes", async () => {
+    const list: string[] = []
+    const hold: Array<{ text: string; resolve: (value?: string) => void }> = []
+    const ctrl = createVoiceCtrl({
+      enabled: () => true,
+      strip: () => true,
+      chunk: "sentence",
+      synth: (text) =>
+        new Promise((resolve) => {
+          hold.push({ text, resolve })
+        }),
+      queue: queue(list),
+    })
+
+    ctrl.sync({ msg: "m1", text: "Primeira frase." })
+    await tick(20)
+    expect(hold.map((item) => item.text)).toEqual(["Primeira frase."])
+
+    ctrl.sync({ msg: "m1", text: "Primeira frase. Segunda frase." })
+    await tick(20)
+    expect(hold.map((item) => item.text)).toEqual(["Primeira frase.", "Segunda frase."])
+
+    hold[0]?.resolve("audio:Primeira")
+    await tick(10)
+    expect(list).toEqual(["audio:Primeira"])
+
+    hold[1]?.resolve("audio:Segunda")
+    await tick(10)
+    expect(list).toEqual(["audio:Primeira", "audio:Segunda"])
+  })
+
+  test("assigns higher effort to earlier chunks", async () => {
+    const efforts: number[] = []
+    const ctrl = createVoiceCtrl({
+      enabled: () => true,
+      strip: () => true,
+      chunk: "clause",
+      width: 3,
+      synth: async (text, meta) => {
+        efforts.push(meta.effort)
+        return `audio:${text}`
+      },
+      queue: {
+        enqueue: () => undefined,
+        clear: () => undefined,
+        update: () => undefined,
+        state: () => ({
+          state: "idle" as const,
+          pending: 0,
+          mode: "htmlaudio" as const,
+          muted: false,
+          volume: 1,
+        }),
+      },
+    })
+
+    ctrl.sync({ msg: "m1", text: "Sim, tenho integração com o Outline. Posso criar e gerenciar documentos e coleções, tipo pastas e notas." })
+    await tick(20)
+
+    expect(efforts[0]).toBe(1)
+    expect(efforts[1]).toBe(0.5)
+    expect(efforts[2]).toBe(0.25)
   })
 })

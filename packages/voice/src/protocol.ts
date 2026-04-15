@@ -1,5 +1,5 @@
 import z from "zod"
-import { ConfigCfg, Status, SynthesizeInput, TranscribeOutput, VoiceMode } from "./schema"
+import { ConfigCfg, Status, SynthesizeInput, TranscribeOutput, VoiceMode, VoiceProfile } from "./schema"
 
 const Base = z
   .object({
@@ -35,6 +35,8 @@ export const Transcribe = Base.extend({
       path: z.string(),
       language: z.string().optional(),
       diarization: z.boolean().optional(),
+      profile: VoiceProfile.optional(),
+      partial: z.boolean().optional(),
     })
     .strict(),
 }).meta({ ref: "VoiceWorkerTranscribe" })
@@ -45,6 +47,8 @@ export const Synthesize = Base.extend({
     .object({
       cfg: ConfigCfg,
       text: z.string(),
+      profile: VoiceProfile.optional(),
+      rank: z.number().int().nonnegative().optional(),
       preset: z.string().optional(),
       mode: VoiceMode.optional(),
       ref_audio_path: z.string().optional(),

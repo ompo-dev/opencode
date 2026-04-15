@@ -6,7 +6,9 @@ describe("voiceCfg", () => {
     const cfg = voiceCfg()
     expect(cfg.runtime.enabled).toBe(true)
     expect(cfg.stt.provider).toBe("whisperx")
+    expect(cfg.stt.call_model).toBe("small")
     expect(cfg.tts.provider).toBe("omnivoice")
+    expect(cfg.tts.call_num_step).toBe(24)
   })
 
   test("accepts presets and tags", () => {
@@ -128,6 +130,26 @@ describe("voiceCfg", () => {
     })
 
     expect(out.text).toBe("Title.\nalpha.\nbeta.")
+  })
+
+  test("uses the call profile overrides when requested", () => {
+    const cfg = voiceCfg({
+      tts: {
+        call_strip_markdown: false,
+        call_speed: 0.9,
+        call_num_step: 18,
+      },
+    })
+
+    const out = voiceInput({
+      config: cfg,
+      text: "# Título",
+      profile: "call",
+    })
+
+    expect(out.text).toBe("# Título")
+    expect(out.speed).toBe(0.9)
+    expect(out.num_step).toBe(18)
   })
 
   test("parses extended engine status", () => {

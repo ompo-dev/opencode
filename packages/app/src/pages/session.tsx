@@ -1,4 +1,4 @@
-import type { Project, UserMessage, VcsFileDiff } from "@opencode-ai/sdk/v2"
+import type { AssistantMessage, Part, Project, UserMessage, VcsFileDiff } from "@opencode-ai/sdk/v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useMutation } from "@tanstack/solid-query"
 import {
@@ -31,6 +31,7 @@ import { checksum } from "@opencode-ai/util/encode"
 import { useSearchParams } from "@solidjs/router"
 import { NewSessionView, SessionHeader } from "@/components/session"
 import { useComments } from "@/context/comments"
+import { useGlobalSDK } from "@/context/global-sdk"
 import { getSessionPrefetch, SESSION_PREFETCH_TTL } from "@/context/global-sync/session-prefetch"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
@@ -50,6 +51,7 @@ import {
   shouldFocusTerminalOnKeyDown,
 } from "@/pages/session/helpers"
 import { MessageTimeline } from "@/pages/session/message-timeline"
+import { createSessionCall } from "@/pages/session/call"
 import { type DiffStyle, SessionReviewTab, type SessionReviewTabProps } from "@/pages/session/review-tab"
 import { SessionSourceControlPanel } from "@/pages/session/source-control-panel"
 import { useSessionLayout } from "@/pages/session/session-layout"
@@ -63,7 +65,9 @@ import { diffs as list } from "@/utils/diffs"
 import { Persist, persisted } from "@/utils/persist"
 import { extractPromptFromParts } from "@/utils/prompt"
 import { same } from "@/utils/same"
+import { callHidden } from "@/utils/call"
 import { formatServerError } from "@/utils/server-errors"
+import { voiceCfg } from "@opencode-ai/voice"
 
 const emptyUserMessages: UserMessage[] = []
 type FollowupItem = FollowupDraft & { id: string }
@@ -319,6 +323,7 @@ function createSessionHistoryWindow(input: SessionHistoryWindowInput) {
 }
 
 export default function Page() {
+  const globalSDK = useGlobalSDK()
   const globalSync = useGlobalSync()
   const layout = useLayout()
   const local = useLocal()
@@ -489,6 +494,33 @@ export default function Page() {
     },
   )
   const lastUserMessage = createMemo(() => visibleUserMessages().at(-1))
+  const liveStatus = createMemo(() => sync.data.session_status[params.id ?? ""] ?? { type: "idle" as const })
+  const liveAssistant = createMemo<{ id: string; parts: Part[] } | undefined>((prev) => {
+    const next = messages().findLast((item): item is AssistantMessage => item.role === "assistant" && typeof item.time.completed !== "number")
+    if (next) {
+      return {
+        id: next.id,
+        parts: sync.data.part[next.id] ?? [],
+      }
+    }
+    if (liveStatus().type !== "idle") {
+      const last = messages().findLast((item): item is AssistantMessage => item.role === "assistant")
+      if (last) {
+        return {
+          id: last.id,
+          parts: sync.data.part[last.id] ?? [],
+        }
+      }
+    }
+    if (!prev) return
+    const last = messages().find((item): item is AssistantMessage => item.role === "assistant" && item.id === prev.id)
+    if (!last) return
+    return {
+      id: last.id,
+      parts: sync.data.part[last.id] ?? [],
+    }
+  })
+  const voice = createMemo(() => voiceCfg(globalSync.data.config.voice))
 
   createEffect(() => {
     const tab = activeFileTab()
@@ -1768,6 +1800,70 @@ export default function Page() {
   const halt = (sessionID: string) =>
     busy(sessionID) ? sdk.client.session.abort({ sessionID }).catch(() => {}) : Promise.resolve()
 
+  const sendCall = async (text: string) => {
+    const sessionID = params.id
+    if (!sessionID) {
+      showToast({
+        title: "Call indisponível",
+        description: "Abra uma sessão antes de iniciar a conversa por voz.",
+      })
+      return false
+    }
+    const model = local.model.current()
+    const agent = local.agent.current()
+    if (!model || !agent) {
+      showToast({
+        title: "Modelo ou agente ausente",
+        description: "Selecione um agente e um modelo antes de iniciar a call.",
+      })
+      return false
+    }
+    return sendFollowupDraft({
+      client: sdk.client,
+      sync,
+      globalSync,
+      optimisticBusy: true,
+      draft: {
+        sessionID,
+        sessionDirectory: sdk.directory,
+        prompt: [
+          {
+            type: "text",
+            content: text,
+            start: 0,
+            end: text.length,
+          },
+        ],
+        context: [],
+        hidden: [...callHidden()],
+        agent: agent.name,
+        model: {
+          providerID: model.provider.id,
+          modelID: model.id,
+        },
+        variant: local.model.variant.current(),
+      },
+    }).catch((error) => {
+      fail(error)
+      return false
+    })
+  }
+
+  const call = createSessionCall({
+    globalSDK,
+    session: () => params.id,
+    turn: () => lastUserMessage()?.id,
+    msg: createMemo(() => liveAssistant()?.id),
+    parts: createMemo(() => liveAssistant()?.parts ?? []),
+    status: liveStatus,
+    cfg: voice,
+    mute: settings.voice.mute,
+    volume: settings.voice.volume,
+    device: settings.voice.device,
+    send: sendCall,
+    abort: () => (params.id ? halt(params.id).then(() => undefined) : Promise.resolve()),
+  })
+
   const revertMutation = useMutation(() => ({
     mutationFn: async (input: { sessionID: string; messageID: string }) => {
       const prev = prompt.current().slice()
@@ -2023,6 +2119,7 @@ export default function Page() {
                     }}
                     renderedUserMessages={historyWindow.renderedUserMessages()}
                     anchor={anchor}
+                    voiceEnabled={() => !call.active()}
                   />
                 </Show>
               </Match>
@@ -2036,6 +2133,7 @@ export default function Page() {
             state={composer}
             ready={!store.deferRender && messagesReady()}
             centered={centered()}
+            call={call}
             inputRef={(el) => {
               inputRef = el
             }}

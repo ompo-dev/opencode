@@ -1,4 +1,4 @@
-import fs from "fs/promises"
+﻿import fs from "fs/promises"
 import path from "path"
 import { Buffer } from "node:buffer"
 import { randomUUID } from "node:crypto"
@@ -44,6 +44,7 @@ const install = {
   whisperx: "3.8.5",
   omnivoice: "0.1.4",
 }
+const span = 2
 const win = {
   url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
 }
@@ -102,6 +103,7 @@ export function voicePaths(input: { data: string; cache: string; bin?: Bin }) {
 export function resolveSynth(config: VoiceConfigResolved, input: z.input<typeof SynthesizeInput>) {
   const req = SynthesizeInput.parse(input)
   const pick = req.preset ? voicePreset(config, req.preset) : voicePreset(config)
+  const call = req.profile === "call"
 
   const design = {
     ...pick?.design,
@@ -111,11 +113,13 @@ export function resolveSynth(config: VoiceConfigResolved, input: z.input<typeof 
   const extra = req.instruct ?? pick?.instruct
   const instruct =
     base && extra?.trim()
-      ? `${base}${design.chinese_dialect ? "，" : ", "}${extra.trim()}`
+      ? `${base}, ${extra.trim()}`
       : [base, extra].filter((item): item is string => !!item?.trim()).join(" ")
 
   return SynthesizeInput.parse({
     text: req.text,
+    profile: req.profile,
+    rank: req.rank,
     preset: pick?.id,
     mode: req.mode ?? pick?.mode,
     ref_audio_path: req.ref_audio_path ?? pick?.ref_audio_path,
@@ -124,9 +128,9 @@ export function resolveSynth(config: VoiceConfigResolved, input: z.input<typeof 
     design: Object.values(design).some(Boolean) ? design : undefined,
     tags: req.tags ?? pick?.tags,
     language: req.language ?? pick?.language,
-    speed: req.speed ?? pick?.speed ?? config.tts.speed,
+    speed: req.speed ?? pick?.speed ?? (call ? config.tts.call_speed : config.tts.speed),
     duration: req.duration ?? config.tts.duration,
-    num_step: req.num_step ?? config.tts.num_step,
+    num_step: req.num_step ?? (call ? config.tts.call_num_step : config.tts.num_step),
   })
 }
 
@@ -161,17 +165,18 @@ function needRefText(input: z.infer<typeof SynthesizeInput>) {
 export namespace Voice {
   const log = Log.create({ service: "voice" })
 
-  type State = {
-    phase: VoiceStatus["phase"]
-    err?: string
-    device: string
-    bin: Bin
-    workers: Partial<Record<Kind, Worker>>
-    active?: Kind
-    task?: Task
-    ensure?: Promise<void>
-    abort?: AbortController
-    queue: Promise<void>
+type State = {
+  phase: VoiceStatus["phase"]
+  err?: string
+  device: string
+  bin: Bin
+  workers: Partial<Record<Kind, Worker>>
+  tts: Worker[]
+  active?: Kind
+  task?: Task
+  ensure?: Promise<void>
+  abort?: AbortController
+  queue: Promise<void>
   }
 
   const state: State = {
@@ -179,6 +184,7 @@ export namespace Voice {
     device: "auto",
     bin: {},
     workers: {},
+    tts: [],
     queue: Promise.resolve(),
   }
 
@@ -221,6 +227,21 @@ export namespace Voice {
       device: config.runtime.device,
       dtype: config.runtime.dtype,
       model: omnivoice,
+    })
+  }
+
+  function sttProfile(config: VoiceConfigResolved, req: z.infer<typeof TranscribeInput>) {
+    if (req.profile !== "call") return config
+    return voiceCfg({
+      ...config,
+      stt: {
+        ...config.stt,
+        model: config.stt.call_model,
+        timestamps: "none",
+        diarization: false,
+        beam_size: 1,
+        batch_size: Math.min(config.stt.batch_size, 4),
+      },
     })
   }
 
@@ -486,6 +507,7 @@ function audioType(file: string) {
     readonly kind: Kind
     readonly sig: string
     readonly proc: Process.Child
+    readonly model: string
     device?: string
     warmed = false
     private readonly wait = new Map<string, { ok: (value: unknown) => void; err: (error: Error) => void }>()
@@ -493,6 +515,7 @@ function audioType(file: string) {
     constructor(kind: Kind, next: PathInfo, config: VoiceConfigResolved, file: string) {
       this.kind = kind
       this.sig = sig(kind, config)
+      this.model = kind === "stt" ? config.stt.model : omnivoice
       this.proc = Process.spawn([envInfo(next, kind).python, "-u", file], {
         cwd: next.root,
         env: procEnv(next, config, kind),
@@ -537,6 +560,10 @@ function audioType(file: string) {
         for (const [id, slot] of this.wait.entries()) {
           slot.err(new Error(`Voice worker exited with code ${code}`))
           this.wait.delete(id)
+        }
+        if (this.kind === "tts") {
+          state.tts = state.tts.filter((item) => item !== this)
+          if (state.workers.tts === this) state.workers.tts = state.tts[0]
         }
         if (state.workers[this.kind] === this) {
           state.workers[this.kind] = undefined
@@ -590,6 +617,14 @@ function audioType(file: string) {
 
   async function stop(kind?: Kind) {
     if (kind) {
+      if (kind === "tts") {
+        const prev = [...state.tts]
+        state.tts = []
+        state.workers.tts = undefined
+        if (state.active === kind) state.active = undefined
+        await Promise.all(prev.map((item) => item.stop().catch(() => undefined)))
+        return
+      }
       const prev = state.workers[kind]
       state.workers[kind] = undefined
       if (state.active === kind) state.active = undefined
@@ -609,6 +644,31 @@ function audioType(file: string) {
     await probe(worker, config)
     if (!quiet) await set("ready", { device: state.device })
     return worker
+  }
+
+  async function pool(next: PathInfo, config: VoiceConfigResolved, count: number) {
+    const need = Math.max(1, Math.min(span, count))
+    if (state.tts.some((item) => item.sig !== sig("tts", config))) {
+      await stop("tts")
+    }
+    while (state.tts.length < need) {
+      const file = await ensureWorker(next)
+      const worker = new Worker("tts", next, config, file)
+      state.tts = [...state.tts, worker]
+      if (!state.workers.tts) {
+        state.workers.tts = worker
+        await probe(worker, config)
+      } else {
+        await probe(worker, config)
+      }
+    }
+    if (state.tts.length > need) {
+      const drop = state.tts.slice(need)
+      state.tts = state.tts.slice(0, need)
+      await Promise.all(drop.map((item) => item.stop().catch(() => undefined)))
+    }
+    state.workers.tts = state.tts[0]
+    return state.tts
   }
 
   async function ensureTarget(target: Kind | "all", preload = false) {
@@ -645,7 +705,7 @@ function audioType(file: string) {
       }
       for (const [idx, item] of list.entries()) {
         abort.signal.throwIfAborted()
-        let worker = state.workers[item]
+        let worker = item === "tts" ? state.tts[0] : state.workers[item]
         if (worker && worker.sig !== sig(item, config)) {
           await stop(item)
           worker = undefined
@@ -656,7 +716,11 @@ function audioType(file: string) {
             stage: `start:${item}`,
             progress: 55 + Math.round(((idx + 1) / Math.max(1, list.length)) * (preload ? 15 : 45)),
           })
-          worker = await start(next, config, item, true)
+          if (item === "tts") {
+            worker = (await pool(next, config, 1))[0]
+          } else {
+            worker = await start(next, config, item, true)
+          }
         }
         if (!preload) continue
         await task({
@@ -665,8 +729,12 @@ function audioType(file: string) {
           progress: 72 + Math.round(((idx + 1) / Math.max(1, list.length)) * 28),
         })
         abort.signal.throwIfAborted()
-        await warm(worker, config)
-        if (item === "stt") await mark(next, config.stt.model)
+        if (item === "tts") {
+          await warm(worker, config)
+        } else {
+          await warm(worker, config)
+          await mark(next, config.stt.model)
+        }
       }
       await task({ target, stage: "ready", progress: 100 })
       await set("ready", { device: state.device })
@@ -705,22 +773,42 @@ function audioType(file: string) {
       if (!next.runtime.install_on_demand) throw new Error(`Voice ${kind.toUpperCase()} runtime is not installed`)
       await ensureTarget(kind, preload)
     }
-    let worker = state.workers[kind]
+    let worker = kind === "tts" ? state.tts[0] : state.workers[kind]
     if (worker && worker.sig !== sig(kind, next)) {
       await stop(kind)
       worker = undefined
     }
     if (!worker) {
       await task({ target: kind, stage: `start:${kind}`, progress: 40 })
-      worker = await start(info, next, kind)
+      worker = kind === "tts" ? (await pool(info, next, 1))[0] : await start(info, next, kind)
     }
-    if (preload && !worker.warmed) {
+    const cold = kind === "tts" ? state.tts.some((item) => !item.warmed) : !worker.warmed
+    if (preload && cold) {
       await task({ target: kind, stage: `warm:${kind}`, progress: 80 })
-      await warm(worker, next)
-      if (kind === "stt") await mark(info, next.stt.model)
+      if (kind === "tts") {
+        await warm(worker, next)
+      } else {
+        await warm(worker, next)
+        await mark(info, next.stt.model)
+      }
       await task()
     }
     return { config: next, paths: info, worker }
+  }
+
+  async function selectTts(config: VoiceConfigResolved, rank: number) {
+    const next = paths()
+    await dirs(next)
+    if (!state.bin.ffmpeg || !state.bin.ffprobe) {
+      await ensureFfmpeg(next)
+    }
+    if (await missing(next, config, "tts")) {
+      if (!config.runtime.install_on_demand) throw new Error("Voice TTS runtime is not installed")
+      await ensureTarget("tts", false)
+    }
+    const slot = Math.max(0, Math.min(2, rank))
+    const list = await pool(next, config, slot + 1)
+    return { worker: list[Math.min(slot, list.length - 1)] ?? list[0], paths: next }
   }
 
   async function serial<T>(kind: Kind, fn: () => Promise<T>) {
@@ -783,10 +871,11 @@ function audioType(file: string) {
     const taskInfo = state.task
     const sttLoading = touches("stt", taskInfo)
     const ttsLoading = touches("tts", taskInfo)
+    const sttModel = stt?.model ?? config.stt.model
     const sttDownloaded = Array.from(
       new Set([
         ...saved.downloaded,
-        ...(stt?.warmed ? [config.stt.model] : []),
+        ...(stt?.warmed && stt?.model ? [stt.model] : []),
       ]),
     )
     const ready = state.phase == "ready" || state.phase == "busy"
@@ -815,17 +904,17 @@ function audioType(file: string) {
           warmed: !!stt?.warmed,
           standby: !!stt?.warmed,
           device: stt?.device,
-          model: config.stt.model,
+          model: sttModel,
           loading: sttLoading,
           progress: sttLoading ? taskInfo?.progress : undefined,
           note: note("stt", taskInfo),
-          models: Array.from(new Set([config.stt.model, ...sttDownloaded])).map((id) => ({
+          models: Array.from(new Set([config.stt.model, config.stt.call_model, sttModel, ...sttDownloaded])).map((id) => ({
             id,
             downloaded: sttDownloaded.includes(id),
-            active: id === config.stt.model,
-            loading: sttLoading && id === config.stt.model,
-            progress: sttLoading && id === config.stt.model ? taskInfo?.progress : undefined,
-            note: sttLoading && id === config.stt.model ? note("stt", taskInfo) : undefined,
+            active: id === sttModel,
+            loading: sttLoading && id === sttModel,
+            progress: sttLoading && id === sttModel ? taskInfo?.progress : undefined,
+            note: sttLoading && id === sttModel ? note("stt", taskInfo) : undefined,
           })),
         },
         tts: {
@@ -931,7 +1020,8 @@ function audioType(file: string) {
   export async function transcribe(input: z.input<typeof TranscribeInput>) {
     const req = TranscribeInput.parse(input)
     return serial("stt", async () => {
-      const config = await cfg()
+      const base = await cfg()
+      const config = sttProfile(base, req)
       const next = paths()
       const { worker } = await ready("stt", false, config)
       const file = path.join(next.tmp, `${randomUUID()}.wav`)
@@ -944,6 +1034,8 @@ function audioType(file: string) {
             path: file,
             language: req.language,
             diarization: req.diarization,
+            profile: req.profile,
+            partial: req.partial,
           },
         })
         worker.warmed = true
@@ -956,36 +1048,37 @@ function audioType(file: string) {
   }
 
   export async function synthesize(input: z.input<typeof SynthesizeInput>) {
-    return serial("tts", async () => {
-      const config = await cfg()
-      let req = resolveSynth(config, input)
-      if (needRefText(req) && req.ref_audio_path) {
-        const ref = await transcribeFile(req.ref_audio_path, config, req.language)
-        req = SynthesizeInput.parse({
-          ...req,
-          ref_text: ref.text,
-        })
-      }
-      const { worker } = await ready("tts", false, config)
-      const out = await worker.req({
-        cmd: "synthesize",
-        input: {
-          cfg: config,
-          text: req.text,
-          preset: req.preset,
-          mode: req.mode,
-          ref_audio_path: req.ref_audio_path,
-          ref_text: req.ref_text,
-          instruct: req.instruct,
-          tags: req.tags,
-          language: req.language,
-          speed: req.speed,
-          duration: req.duration,
-          num_step: req.num_step,
-        },
+    const config = await cfg()
+    let req = resolveSynth(config, input)
+    if (needRefText(req) && req.ref_audio_path) {
+      const ref = await transcribeFile(req.ref_audio_path, config, req.language)
+      req = SynthesizeInput.parse({
+        ...req,
+        ref_text: ref.text,
       })
-      worker.warmed = true
-      return SynthesizeOutput.parse(out)
+    }
+    const { worker } = await selectTts(config, req.rank ?? 0)
+    const out = await worker.req({
+      cmd: "synthesize",
+      input: {
+        cfg: config,
+        text: req.text,
+        profile: req.profile,
+        rank: req.rank,
+        preset: req.preset,
+        mode: req.mode,
+        ref_audio_path: req.ref_audio_path,
+        ref_text: req.ref_text,
+        instruct: req.instruct,
+        tags: req.tags,
+        language: req.language,
+        speed: req.speed,
+        duration: req.duration,
+        num_step: req.num_step,
+      },
     })
+    worker.warmed = true
+    return SynthesizeOutput.parse(out)
   }
 }
+

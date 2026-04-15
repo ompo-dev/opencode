@@ -4,6 +4,7 @@ import { createStore } from "solid-js/store"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { useLanguage } from "@/context/language"
+import { voiceCall } from "@/context/voice-call"
 import { voiceDebug } from "@/context/voice-debug"
 
 type Mem = Performance & {
@@ -129,6 +130,7 @@ export function DebugBar() {
   const stt = () => voiceDebug.state.stt
   const tts = () => voiceDebug.state.tts
   const queue = () => voiceDebug.state.queue
+  const call = () => voiceCall.state
   const micv = () =>
     mic().state === "idle" && mic().duration_ms ? (time(mic().duration_ms) ?? na()) : stateText(mic().state)
   const sttv = () => {
@@ -149,6 +151,10 @@ export function DebugBar() {
   const outv = () => {
     if (queue().mode === "none") return "--"
     return `${queue().mode === "webaudio" ? "WA" : "EL"} ${Math.round(queue().volume * 100)}`
+  }
+  const callv = () => {
+    if (!call().active && call().phase === "idle") return "--"
+    return short(call().phase)
   }
 
   let prev = ""
@@ -552,6 +558,35 @@ export function DebugBar() {
           value={outv()}
           bad={queue().mode === "none"}
           dim={queue().at === 0}
+        />
+        <Cell
+          label="CALL"
+          tip={[
+            `state: ${call().phase}`,
+            `active: ${call().active ? "yes" : "no"}`,
+            `turn: ${call().pending_user_turn ? "pending" : "clear"}`,
+            `tts: ${call().pending_tts}`,
+            call().error || undefined,
+          ]
+            .filter(Boolean)
+            .join("\n")}
+          value={callv()}
+          bad={call().phase === "error"}
+          dim={!call().active && call().phase === "idle"}
+        />
+        <Cell
+          label="VAD"
+          tip={[
+            `vad: ${call().vad}`,
+            `elapsed: ${ms(call().elapsed_ms) ?? na()}`,
+            call().user_partial ? `user: ${short(call().user_partial)}` : undefined,
+            call().assistant_partial ? `assistant: ${short(call().assistant_partial)}` : undefined,
+          ]
+            .filter(Boolean)
+            .join("\n")}
+          value={call().vad === "idle" && !call().active ? "--" : short(call().vad)}
+          bad={call().interrupting}
+          dim={!call().active && call().phase === "idle"}
         />
       </div>
     </aside>

@@ -1,4 +1,4 @@
-import { Button } from "@opencode-ai/ui/button"
+﻿import { Button } from "@opencode-ai/ui/button"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Select } from "@opencode-ai/ui/select"
 import { Switch } from "@opencode-ai/ui/switch"
@@ -47,16 +47,16 @@ const stamps = [
 ] as const
 
 const sttlangs = [
-  { value: "auto", label: "Automático" },
-  { value: "pt", label: "Português (pt)" },
-  { value: "en", label: "Inglês (en)" },
+  { value: "auto", label: "AutomÃ¡tico" },
+  { value: "pt", label: "PortuguÃªs (pt)" },
+  { value: "en", label: "InglÃªs (en)" },
   { value: "es", label: "Espanhol (es)" },
-  { value: "fr", label: "Francês (fr)" },
-  { value: "de", label: "Alemão (de)" },
+  { value: "fr", label: "FrancÃªs (fr)" },
+  { value: "de", label: "AlemÃ£o (de)" },
   { value: "it", label: "Italiano (it)" },
-  { value: "ja", label: "Japonês (ja)" },
+  { value: "ja", label: "JaponÃªs (ja)" },
   { value: "ko", label: "Coreano (ko)" },
-  { value: "zh", label: "Chinês (zh)" },
+  { value: "zh", label: "ChinÃªs (zh)" },
   { value: "ru", label: "Russo (ru)" },
 ] as const
 
@@ -83,12 +83,20 @@ const modes = [
   { value: "design", label: "Design de voz" },
 ] as const
 
-const chunk = [{ value: "sentence", label: "Por frase" }] as const
+const chunk = [
+  { value: "clause", label: "Por oração" },
+  { value: "sentence", label: "Por frase" },
+] as const
+const pauses = [
+  { value: "balanced", label: "Balanceado" },
+  { value: "aggressive", label: "Agressivo" },
+  { value: "conservative", label: "Conservador" },
+] as const
 const autos = [{ value: "", label: "Auto" }] as const
 const genders = [...autos, { value: "female", label: "Feminino" }, { value: "male", label: "Masculino" }] as const
 const ages = [
   ...autos,
-  { value: "child", label: "Criança" },
+  { value: "child", label: "CrianÃ§a" },
   { value: "teenager", label: "Adolescente" },
   { value: "young adult", label: "Jovem adulto" },
   { value: "middle-aged", label: "Meia-idade" },
@@ -98,7 +106,7 @@ const pitches = [
   ...autos,
   { value: "very low pitch", label: "Muito grave" },
   { value: "low pitch", label: "Grave" },
-  { value: "moderate pitch", label: "Médio" },
+  { value: "moderate pitch", label: "MÃ©dio" },
   { value: "high pitch", label: "Agudo" },
   { value: "very high pitch", label: "Muito agudo" },
 ] as const
@@ -118,18 +126,18 @@ const accents = [
 ] as const
 const dialects = [
   ...autos,
-  { value: "东北话", label: "Dongbei" },
-  { value: "云南话", label: "Yunnan" },
-  { value: "四川话", label: "Sichuan" },
-  { value: "宁夏话", label: "Ningxia" },
-  { value: "桂林话", label: "Guilin" },
-  { value: "河南话", label: "Henan" },
-  { value: "济南话", label: "Jinan" },
-  { value: "甘肃话", label: "Gansu" },
-  { value: "石家庄话", label: "Shijiazhuang" },
-  { value: "贵州话", label: "Guizhou" },
-  { value: "陕西话", label: "Shaanxi" },
-  { value: "青岛话", label: "Qingdao" },
+  { value: "ä¸œåŒ—è¯", label: "Dongbei" },
+  { value: "äº‘å—è¯", label: "Yunnan" },
+  { value: "å››å·è¯", label: "Sichuan" },
+  { value: "å®å¤è¯", label: "Ningxia" },
+  { value: "æ¡‚æž—è¯", label: "Guilin" },
+  { value: "æ²³å—è¯", label: "Henan" },
+  { value: "æµŽå—è¯", label: "Jinan" },
+  { value: "ç”˜è‚ƒè¯", label: "Gansu" },
+  { value: "çŸ³å®¶åº„è¯", label: "Shijiazhuang" },
+  { value: "è´µå·žè¯", label: "Guizhou" },
+  { value: "é™•è¥¿è¯", label: "Shaanxi" },
+  { value: "é’å²›è¯", label: "Qingdao" },
 ] as const
 
 void accents
@@ -231,14 +239,14 @@ export const SettingsVoice: Component = () => {
     tags: "",
   })
   const [preview, setPreview] = createStore({
-    text: tx("Olá do OpenCode.", "Hello from OpenCode."),
+    text: tx("OlÃ¡ do OpenCode.", "Hello from OpenCode."),
     audio: "",
-    status: tx("Pronto para sintetizar uma prévia.", "Ready to synthesize a preview."),
+    status: tx("Pronto para sintetizar uma prÃ©via.", "Ready to synthesize a preview."),
     busy: false,
   })
   const [capture, setCapture] = createStore({
     mode: "idle" as "idle" | "preparing" | "recording" | "saving" | "error",
-    status: tx("Pronto para capturar um áudio de referência.", "Ready to capture a reference voice clip."),
+    status: tx("Pronto para capturar um Ã¡udio de referÃªncia.", "Ready to capture a reference voice clip."),
     duration_ms: 0,
   })
   const [ref, setRef] = createStore({
@@ -248,7 +256,7 @@ export const SettingsVoice: Component = () => {
     error: "",
   })
   const [audio, setAudio] = createSignal<Array<{ value: string; label: string }>>([
-    { value: "", label: tx("Padrão do sistema", "System default") },
+    { value: "", label: tx("PadrÃ£o do sistema", "System default") },
   ])
   let rec: Awaited<ReturnType<typeof startPromptRecording>> | undefined
 
@@ -279,7 +287,7 @@ export const SettingsVoice: Component = () => {
         ? tx(`baixando ${item.progress ?? 0}%`, `downloading ${item.progress ?? 0}%`)
         : item.downloaded
           ? tx("baixado", "downloaded")
-          : tx("não baixado", "not downloaded"),
+          : tx("nÃ£o baixado", "not downloaded"),
     })),
   )
   const customModel = createMemo(() => !sttmodels.some((item) => item.value === draft.stt.model) || store.custom)
@@ -356,8 +364,8 @@ export const SettingsVoice: Component = () => {
   }
 
   const notify = (error: unknown) => {
-    const message = formatServerError(error, undefined, tx("A requisição de voz falhou", "Voice request failed"))
-    showToast({ title: tx("Falha nas configurações de voz", "Voice settings failed"), description: message })
+    const message = formatServerError(error, undefined, tx("A requisiÃ§Ã£o de voz falhou", "Voice request failed"))
+    showToast({ title: tx("Falha nas configuraÃ§Ãµes de voz", "Voice settings failed"), description: message })
   }
 
   const save = async () => {
@@ -468,13 +476,13 @@ export const SettingsVoice: Component = () => {
         value: item.deviceId,
         label: item.label || tx(`Entrada ${idx + 1}`, `Input ${idx + 1}`),
       }))
-    setAudio([{ value: "", label: tx("Padrão do sistema", "System default") }, ...next])
+    setAudio([{ value: "", label: tx("PadrÃ£o do sistema", "System default") }, ...next])
   }
 
   const previewVoice = async () => {
     if (preview.busy) return
     setPreview("busy", true)
-    setPreview("status", tx("Sintetizando prévia...", "Synthesizing preview..."))
+    setPreview("status", tx("Sintetizando prÃ©via...", "Synthesizing preview..."))
     try {
       const res = await globalSDK.client.global.voice.synthesize({
         voiceSynthesizeInput: voiceInput({
@@ -485,7 +493,7 @@ export const SettingsVoice: Component = () => {
       })
       const audio = res.data?.audio ?? ""
       setPreview("audio", audio)
-      setPreview("status", audio ? tx("Prévia pronta.", "Preview ready.") : tx("Nenhum áudio foi retornado.", "No audio returned."))
+      setPreview("status", audio ? tx("PrÃ©via pronta.", "Preview ready.") : tx("Nenhum Ã¡udio foi retornado.", "No audio returned."))
       voiceDebug.tts({
         state: audio ? "ready" : "empty",
         duration_ms: res.data?.duration_ms,
@@ -494,7 +502,7 @@ export const SettingsVoice: Component = () => {
         error: undefined,
       })
     } catch (error) {
-      const message = formatServerError(error, undefined, tx("A requisição de voz falhou", "Voice request failed"))
+      const message = formatServerError(error, undefined, tx("A requisiÃ§Ã£o de voz falhou", "Voice request failed"))
       setPreview("status", message)
       voiceDebug.tts({
         state: "error",
@@ -516,7 +524,7 @@ export const SettingsVoice: Component = () => {
     try {
       rec = await startPromptRecording({ device })
       setCapture("mode", "recording")
-      setCapture("status", tx("Gravando áudio de referência...", "Recording reference audio..."))
+      setCapture("status", tx("Gravando Ã¡udio de referÃªncia...", "Recording reference audio..."))
     } catch (error) {
       rec = undefined
       const message = formatServerError(error, undefined, tx("A captura de voz falhou", "Voice capture failed"))
@@ -534,7 +542,7 @@ export const SettingsVoice: Component = () => {
     })
     setCapture("mode", "saving")
     setCapture("duration_ms", clip.duration_ms)
-    setCapture("status", tx("Salvando áudio de referência...", "Saving reference audio..."))
+    setCapture("status", tx("Salvando Ã¡udio de referÃªncia...", "Saving reference audio..."))
     try {
       const res = await globalSDK.client.global.voice.reference({
         voiceReferenceInput: {
@@ -555,14 +563,14 @@ export const SettingsVoice: Component = () => {
         error: "",
       })
       const status = out?.transcript_error
-        ? tx(`Referência salva. A transcrição falhou: ${out.transcript_error}`, `Reference saved. Transcription failed: ${out.transcript_error}`)
+        ? tx(`ReferÃªncia salva. A transcriÃ§Ã£o falhou: ${out.transcript_error}`, `Reference saved. Transcription failed: ${out.transcript_error}`)
         : out?.text
-          ? tx("Referência salva e transcrita.", "Reference saved and transcribed.")
-          : tx("Referência salva.", "Reference saved.")
+          ? tx("ReferÃªncia salva e transcrita.", "Reference saved and transcribed.")
+          : tx("ReferÃªncia salva.", "Reference saved.")
       setCapture("mode", "idle")
       setCapture("status", status)
       showToast({
-        title: tx("Áudio de referência salvo", "Reference audio saved"),
+        title: tx("Ãudio de referÃªncia salvo", "Reference audio saved"),
         description: out?.transcript_error ? status : out?.path,
       })
     } catch (error) {
@@ -578,7 +586,7 @@ export const SettingsVoice: Component = () => {
     patchPreset("ref_text", undefined)
     setCapture("duration_ms", 0)
     setCapture("mode", "idle")
-    setCapture("status", tx("Referência limpa.", "Reference cleared."))
+    setCapture("status", tx("ReferÃªncia limpa.", "Reference cleared."))
     setRef({
       audio: "",
       name: "",
@@ -618,17 +626,17 @@ export const SettingsVoice: Component = () => {
       "status",
       next
         ? next.mode === "clone" && !next.ref_audio_path
-          ? tx("Grave um trecho de referência para testar esta voz clonada.", "Record a reference clip to preview this cloned voice.")
+          ? tx("Grave um trecho de referÃªncia para testar esta voz clonada.", "Record a reference clip to preview this cloned voice.")
           : tx(`Editando ${next.name}.`, `Editing ${next.name}.`)
-        : tx("Pronto para sintetizar uma prévia.", "Ready to synthesize a preview."),
+        : tx("Pronto para sintetizar uma prÃ©via.", "Ready to synthesize a preview."),
     )
     setCapture("duration_ms", 0)
     setCapture("mode", "idle")
     setCapture(
       "status",
       next
-        ? tx("Pronto para capturar um áudio de referência.", "Ready to capture a reference voice clip.")
-        : tx("Selecione um preset para capturar uma referência.", "Select a preset to capture a reference."),
+        ? tx("Pronto para capturar um Ã¡udio de referÃªncia.", "Ready to capture a reference voice clip.")
+        : tx("Selecione um preset para capturar uma referÃªncia.", "Select a preset to capture a reference."),
     )
     setRef({
       audio: "",
@@ -672,7 +680,7 @@ export const SettingsVoice: Component = () => {
           error: formatServerError(
             error,
             undefined,
-            tx("Não foi possível carregar o áudio de referência", "Reference audio could not be loaded"),
+            tx("NÃ£o foi possÃ­vel carregar o Ã¡udio de referÃªncia", "Reference audio could not be loaded"),
           ),
         })
       })
@@ -834,7 +842,7 @@ export const SettingsVoice: Component = () => {
 
         <Section title={tx("Runtime", "Runtime")}>
           <SettingsList>
-            <Row title={tx("Ativado", "Enabled")} description={tx("Expõe os recursos de voz local no aplicativo.", "Expose local voice features in the app.")}>
+            <Row title={tx("Ativado", "Enabled")} description={tx("ExpÃµe os recursos de voz local no aplicativo.", "Expose local voice features in the app.")}>
               <Switch checked={draft.runtime.enabled} onChange={(value) => setDraft("runtime", "enabled", value)} />
             </Row>
             <Row
@@ -852,7 +860,7 @@ export const SettingsVoice: Component = () => {
             <Row
               title={tx("Python", "Python")}
               description={tx(
-                "Executável local do Python usado para criar e gerenciar a venv de voz.",
+                "ExecutÃ¡vel local do Python usado para criar e gerenciar a venv de voz.",
                 "Local Python executable used to create and manage the voice venv.",
               )}
             >
@@ -901,7 +909,7 @@ export const SettingsVoice: Component = () => {
             <Row
               title={tx("Modelo", "Model")}
               description={tx(
-                "Escolha um preset do WhisperX. O modelo selecionado pode ser pré-carregado agora e fica marcado quando já estiver baixado.",
+                "Escolha um preset do WhisperX. O modelo selecionado pode ser prÃ©-carregado agora e fica marcado quando jÃ¡ estiver baixado.",
                 "Choose a WhisperX model preset. The selected model can be preloaded now and is marked when already downloaded.",
               )}
             >
@@ -910,7 +918,7 @@ export const SettingsVoice: Component = () => {
                     options={modelOptions()}
                     current={modelOptions().find((item) => item.value === draft.stt.model)}
                     value={(item) => item.value}
-                    label={(item) => `${item.label} • ${item.state}`}
+                    label={(item) => `${item.label} â€¢ ${item.state}`}
                     children={(item) =>
                       item && (
                         <div class="flex min-w-0 items-center justify-between gap-3">
@@ -957,7 +965,7 @@ export const SettingsVoice: Component = () => {
             <Row
               title={tx("Idioma", "Language")}
               description={tx(
-                "Use automático para detecção de idioma ou fixe um código para acelerar a transcrição.",
+                "Use automÃ¡tico para detecÃ§Ã£o de idioma ou fixe um cÃ³digo para acelerar a transcriÃ§Ã£o.",
                 "Use auto for language detection or set a fixed language code.",
               )}
             >
@@ -974,7 +982,7 @@ export const SettingsVoice: Component = () => {
                 />
               </div>
             </Row>
-            <Row title={tx("Timestamps", "Timestamps")} description={tx("Escolha a resolução temporal retornada pelo WhisperX.", "Choose the timestamp resolution returned by WhisperX.")}>
+            <Row title={tx("Timestamps", "Timestamps")} description={tx("Escolha a resoluÃ§Ã£o temporal retornada pelo WhisperX.", "Choose the timestamp resolution returned by WhisperX.")}>
               <Select
                 options={[...stamps]}
                 current={stamps.find((item) => item.value === draft.stt.timestamps)}
@@ -986,7 +994,7 @@ export const SettingsVoice: Component = () => {
                 triggerVariant="settings"
               />
             </Row>
-            <Row title={tx("Tipo de computação", "Compute type")} description={tx("Tipo de computação usado pelo WhisperX na inferência.", "WhisperX compute type for inference.")}>
+            <Row title={tx("Tipo de computaÃ§Ã£o", "Compute type")} description={tx("Tipo de computaÃ§Ã£o usado pelo WhisperX na inferÃªncia.", "WhisperX compute type for inference.")}>
               <Select
                 options={ctypes}
                 current={ctypes.find((item) => item.value === draft.stt.compute_type)}
@@ -998,13 +1006,13 @@ export const SettingsVoice: Component = () => {
                 triggerVariant="settings"
               />
             </Row>
-            <Row title={tx("Diarização", "Diarization")} description={tx("Atribui rótulos de falante quando houver um token válido do Hugging Face.", "Assign speaker labels when a valid Hugging Face token is configured.")}>
+            <Row title={tx("DiarizaÃ§Ã£o", "Diarization")} description={tx("Atribui rÃ³tulos de falante quando houver um token vÃ¡lido do Hugging Face.", "Assign speaker labels when a valid Hugging Face token is configured.")}>
               <Switch checked={draft.stt.diarization} onChange={(value) => setDraft("stt", "diarization", value)} />
             </Row>
             <Row title={tx("Detector de voz", "VAD")} description={tx("Executa deteccao de atividade de voz antes da transcricao.", "Run voice activity detection before transcription.")}>
               <Switch checked={draft.stt.vad} onChange={(value) => setDraft("stt", "vad", value)} />
             </Row>
-            <Row title={tx("Tamanho do lote", "Batch size")} description={tx("Tamanho do lote da transcrição. Valores maiores usam mais memória.", "Transcription batch size. Higher values use more memory.")}>
+            <Row title={tx("Tamanho do lote", "Batch size")} description={tx("Tamanho do lote da transcriÃ§Ã£o. Valores maiores usam mais memÃ³ria.", "Transcription batch size. Higher values use more memory.")}>
               <div class="w-full sm:w-[120px]">
                 <TextField
                   type="number"
@@ -1013,7 +1021,7 @@ export const SettingsVoice: Component = () => {
                 />
               </div>
             </Row>
-            <Row title={tx("Largura do beam", "Beam size")} description={tx("Largura do beam usada na decodificação do WhisperX.", "Beam width for WhisperX decoding.")}>
+            <Row title={tx("Largura do beam", "Beam size")} description={tx("Largura do beam usada na decodificaÃ§Ã£o do WhisperX.", "Beam width for WhisperX decoding.")}>
               <div class="w-full sm:w-[120px]">
                 <TextField
                   type="number"
@@ -1027,19 +1035,19 @@ export const SettingsVoice: Component = () => {
 
         <Section title="OmniVoice">
           <SettingsList>
-            <Row title={tx("Fala em tempo real", "Live playback")} description={tx("Sintetiza o texto do assistente enquanto a resposta ainda está chegando.", "Synthesize assistant text while the answer is still streaming.")}>
+            <Row title={tx("Fala em tempo real", "Live playback")} description={tx("Sintetiza o texto do assistente enquanto a resposta ainda estÃ¡ chegando.", "Synthesize assistant text while the answer is still streaming.")}>
               <Switch checked={draft.tts.live} onChange={(value) => setDraft("tts", "live", value)} />
             </Row>
-            <Row title={tx("Reprodução automática", "Autoplay")} description={tx("Reproduz automaticamente o áudio sintetizado do assistente.", "Play synthesized assistant audio automatically.")}>
+            <Row title={tx("ReproduÃ§Ã£o automÃ¡tica", "Autoplay")} description={tx("Reproduz automaticamente o Ã¡udio sintetizado do assistente.", "Play synthesized assistant audio automatically.")}>
               <Switch checked={draft.tts.autoplay} onChange={(value) => setDraft("tts", "autoplay", value)} />
             </Row>
-            <Row title={tx("Parar ao interromper", "Stop on interrupt")} description={tx("Cancela o áudio enfileirado do assistente quando chegar uma nova interrupção.", "Cancel queued assistant audio when a new interruption arrives.")}>
+            <Row title={tx("Parar ao interromper", "Stop on interrupt")} description={tx("Cancela o Ã¡udio enfileirado do assistente quando chegar uma nova interrupÃ§Ã£o.", "Cancel queued assistant audio when a new interruption arrives.")}>
               <Switch checked={draft.tts.stop_on_interrupt} onChange={(value) => setDraft("tts", "stop_on_interrupt", value)} />
             </Row>
-            <Row title={tx("Limpar markdown", "Strip markdown")} description={tx("Normaliza textos com muito markdown antes da síntese.", "Normalize markdown-heavy assistant text before synthesis.")}>
+            <Row title={tx("Limpar markdown", "Strip markdown")} description={tx("Normaliza textos com muito markdown antes da sÃ­ntese.", "Normalize markdown-heavy assistant text before synthesis.")}>
               <Switch checked={draft.tts.strip_markdown} onChange={(value) => setDraft("tts", "strip_markdown", value)} />
             </Row>
-            <Row title={tx("Chunking", "Chunking")} description={tx("Estratégia de divisão usada na fala em tempo real.", "Chunking strategy for live playback.")}>
+            <Row title={tx("Chunking", "Chunking")} description={tx("EstratÃ©gia de divisÃ£o usada na fala em tempo real.", "Chunking strategy for live playback.")}>
               <Select
                 options={[...chunk]}
                 current={chunk[0]}
@@ -1051,7 +1059,7 @@ export const SettingsVoice: Component = () => {
                 triggerVariant="settings"
               />
             </Row>
-            <Row title={tx("Velocidade padrão", "Default speed")} description={tx("Velocidade padrão de fala enviada ao OmniVoice.", "Default speech speed passed to OmniVoice.")}>
+            <Row title={tx("Velocidade padrÃ£o", "Default speed")} description={tx("Velocidade padrÃ£o de fala enviada ao OmniVoice.", "Default speech speed passed to OmniVoice.")}>
               <div class="w-full sm:w-[120px]">
                 <TextField
                   type="number"
@@ -1060,7 +1068,7 @@ export const SettingsVoice: Component = () => {
                 />
               </div>
             </Row>
-            <Row title={tx("Duração padrão", "Default duration")} description={tx("Dica opcional de duração para a síntese.", "Optional duration hint for synthesis.")}>
+            <Row title={tx("DuraÃ§Ã£o padrÃ£o", "Default duration")} description={tx("Dica opcional de duraÃ§Ã£o para a sÃ­ntese.", "Optional duration hint for synthesis.")}>
               <div class="w-full sm:w-[120px]">
                 <TextField
                   type="number"
@@ -1069,7 +1077,7 @@ export const SettingsVoice: Component = () => {
                 />
               </div>
             </Row>
-            <Row title={tx("Passos de difusão", "Diffusion steps")} description={tx("Passos de difusão do OmniVoice para balancear qualidade e latência.", "OmniVoice diffusion steps for generation quality and latency.")}>
+            <Row title={tx("Passos de difusÃ£o", "Diffusion steps")} description={tx("Passos de difusÃ£o do OmniVoice para balancear qualidade e latÃªncia.", "OmniVoice diffusion steps for generation quality and latency.")}>
               <div class="w-full sm:w-[120px]">
                 <TextField
                   type="number"
@@ -1078,7 +1086,7 @@ export const SettingsVoice: Component = () => {
                 />
               </div>
             </Row>
-            <Row title={tx("Preset padrão", "Default preset")} description={tx("Preset usado na fala do assistente e em sínteses avulsas.", "Preset used for assistant playback and ad hoc synthesis.")}>
+            <Row title={tx("Preset padrÃ£o", "Default preset")} description={tx("Preset usado na fala do assistente e em sÃ­nteses avulsas.", "Preset used for assistant playback and ad hoc synthesis.")}>
               <Select
                 options={draft.tts.presets}
                 current={draft.tts.presets.find((item) => item.id === draft.tts.default_preset)}
@@ -1096,7 +1104,7 @@ export const SettingsVoice: Component = () => {
 
         <Section title={tx("Presets", "Presets")}>
           <SettingsList>
-            <Row title={tx("Preset", "Preset")} description={tx("Selecione qual preset do OmniVoice você quer editar.", "Select which OmniVoice preset to edit.")}>
+            <Row title={tx("Preset", "Preset")} description={tx("Selecione qual preset do OmniVoice vocÃª quer editar.", "Select which OmniVoice preset to edit.")}>
               <div class="flex items-center gap-2">
                 <Select
                   options={draft.tts.presets}
@@ -1120,17 +1128,17 @@ export const SettingsVoice: Component = () => {
             <Show when={preset()}>
               {(item) => (
                 <>
-                  <Row title="Preset ID" description={tx("Identificador estável salvo na configuração do servidor.", "Stable identifier saved in server config.")}>
+                  <Row title="Preset ID" description={tx("Identificador estÃ¡vel salvo na configuraÃ§Ã£o do servidor.", "Stable identifier saved in server config.")}>
                     <div class="w-full sm:w-[220px]">
                       <TextField value={item().id} onChange={(value) => patchPreset("id", value)} />
                     </div>
                   </Row>
-                  <Row title={tx("Nome", "Name")} description={tx("Nome amigável exibido nas configurações e no playback.", "Human-friendly name shown in settings and playback config.")}>
+                  <Row title={tx("Nome", "Name")} description={tx("Nome amigÃ¡vel exibido nas configuraÃ§Ãµes e no playback.", "Human-friendly name shown in settings and playback config.")}>
                     <div class="w-full sm:w-[220px]">
                       <TextField value={item().name} onChange={(value) => patchPreset("name", value)} />
                     </div>
                   </Row>
-                  <Row title={tx("Modo", "Mode")} description={tx("Modo automático, clonagem de voz ou design de voz.", "Auto, voice clone, or design preset mode.")}>
+                  <Row title={tx("Modo", "Mode")} description={tx("Modo automÃ¡tico, clonagem de voz ou design de voz.", "Auto, voice clone, or design preset mode.")}>
                     <Select
                       options={[...modes]}
                       current={modes.find((entry) => entry.value === item().mode)}
@@ -1142,13 +1150,13 @@ export const SettingsVoice: Component = () => {
                       triggerVariant="settings"
                     />
                   </Row>
-                  <Row title={tx("Usar como padrão", "Use as default")} description={tx("Define este preset como voz padrão do assistente.", "Make this preset the default voice for assistant playback and ad hoc synthesis.")}>
+                  <Row title={tx("Usar como padrÃ£o", "Use as default")} description={tx("Define este preset como voz padrÃ£o do assistente.", "Make this preset the default voice for assistant playback and ad hoc synthesis.")}>
                     <Button size="small" variant="secondary" onClick={() => setDraft("tts", "default_preset", item().id)}>
-                      {draft.tts.default_preset === item().id ? tx("Preset padrão", "Default preset") : tx("Definir como padrão", "Set as default")}
+                      {draft.tts.default_preset === item().id ? tx("Preset padrÃ£o", "Default preset") : tx("Definir como padrÃ£o", "Set as default")}
                     </Button>
                   </Row>
                   <Show when={clone()}>
-                    <Row title={tx("Áudio de referência", "Reference audio")} description={tx("Grave de 3 a 10 segundos aqui para clonar esta voz direto no OpenCode.", "Record 3 to 10 seconds here to clone this voice directly in OpenCode.")}>
+                    <Row title={tx("Ãudio de referÃªncia", "Reference audio")} description={tx("Grave de 3 a 10 segundos aqui para clonar esta voz direto no OpenCode.", "Record 3 to 10 seconds here to clone this voice directly in OpenCode.")}>
                       <div class="w-full sm:w-[420px]">
                         <AudioCard
                           src={ref.audio}
@@ -1157,8 +1165,8 @@ export const SettingsVoice: Component = () => {
                           busy={capture.mode === "preparing" || capture.mode === "saving"}
                           empty={
                             ref.loading
-                              ? tx("Carregando o áudio de referência salvo...", "Loading saved reference audio...")
-                              : tx("Grave um trecho curto de referência para clonar esta voz.", "Record a short reference clip to clone this voice.")
+                              ? tx("Carregando o Ã¡udio de referÃªncia salvo...", "Loading saved reference audio...")
+                              : tx("Grave um trecho curto de referÃªncia para clonar esta voz.", "Record a short reference clip to clone this voice.")
                           }
                           note={
                             ref.error ||
@@ -1172,7 +1180,7 @@ export const SettingsVoice: Component = () => {
                                 size="small"
                                 variant="ghost"
                                 icon={capture.mode === "recording" ? "stop" : "mic"}
-                                aria-label={capture.mode === "recording" ? tx("Parar gravação", "Stop recording") : tx("Gravar referência", "Record reference")}
+                                aria-label={capture.mode === "recording" ? tx("Parar gravaÃ§Ã£o", "Stop recording") : tx("Gravar referÃªncia", "Record reference")}
                                 onClick={capture.mode === "recording" ? stopCapture : startCapture}
                                 disabled={capture.mode === "preparing" || capture.mode === "saving"}
                               />
@@ -1180,7 +1188,7 @@ export const SettingsVoice: Component = () => {
                                 size="small"
                                 variant="ghost"
                                 icon="trash"
-                                aria-label={tx("Limpar referência", "Clear reference")}
+                                aria-label={tx("Limpar referÃªncia", "Clear reference")}
                                 onClick={clearCapture}
                                 disabled={!item().ref_audio_path && !ref.audio}
                               />
@@ -1189,7 +1197,7 @@ export const SettingsVoice: Component = () => {
                         />
                       </div>
                     </Row>
-                    <Row title={tx("Texto de referência", "Reference text")} description={tx("Transcrição usada junto da voz clonada.", "Transcript used with the cloned voice.")}>
+                    <Row title={tx("Texto de referÃªncia", "Reference text")} description={tx("TranscriÃ§Ã£o usada junto da voz clonada.", "Transcript used with the cloned voice.")}>
                       <div class="w-full sm:w-[420px]">
                         <TextField
                           multiline
@@ -1202,8 +1210,8 @@ export const SettingsVoice: Component = () => {
                   <Show when={!clone()}>
                     <>
                       <Row
-                        title={tx("Instrução", "Instruction")}
-                        description={tx("Orientação extra opcional do OmniVoice somada aos controles de design.", "Optional extra OmniVoice guidance layered on top of the design controls.")}
+                        title={tx("InstruÃ§Ã£o", "Instruction")}
+                        description={tx("OrientaÃ§Ã£o extra opcional do OmniVoice somada aos controles de design.", "Optional extra OmniVoice guidance layered on top of the design controls.")}
                       >
                         <div class="w-full sm:w-[320px]">
                           <TextField
@@ -1215,7 +1223,7 @@ export const SettingsVoice: Component = () => {
                       </Row>
                       <Show when={design()}>
                         <>
-                          <Row title={tx("Gênero", "Gender")} description={tx("Dica estruturada de design de voz incorporada à instrução do OmniVoice.", "Structured voice design hint folded into the OmniVoice instruction.")}>
+                          <Row title={tx("GÃªnero", "Gender")} description={tx("Dica estruturada de design de voz incorporada Ã  instruÃ§Ã£o do OmniVoice.", "Structured voice design hint folded into the OmniVoice instruction.")}>
                             <Select
                               options={[...genders]}
                               current={genders.find((entry) => entry.value === (item().design?.gender ?? "")) ?? genders[0]}
@@ -1265,7 +1273,7 @@ export const SettingsVoice: Component = () => {
                           </Row>
                         </>
                       </Show>
-                      <Row title={tx("Tags", "Tags")} description={tx(`Tags do OmniVoice separadas por vírgula. Suportadas: ${voiceTags.join(", ")}`, `Comma-separated OmniVoice tags. Supported: ${voiceTags.join(", ")}`)}>
+                      <Row title={tx("Tags", "Tags")} description={tx(`Tags do OmniVoice separadas por vÃ­rgula. Suportadas: ${voiceTags.join(", ")}`, `Comma-separated OmniVoice tags. Supported: ${voiceTags.join(", ")}`)}>
                         <div class="w-full sm:w-[320px]">
                           <TextField
                             value={inputs.tags}
@@ -1283,8 +1291,8 @@ export const SettingsVoice: Component = () => {
                         </div>
                       </Row>
                       <Row
-                        title={tx("Instrução resolvida", "Resolved instruction")}
-                        description={tx("Instrução final do OmniVoice após combinar controles estruturados e texto livre.", "Effective OmniVoice instruction after combining structured design controls and freeform instruction.")}
+                        title={tx("InstruÃ§Ã£o resolvida", "Resolved instruction")}
+                        description={tx("InstruÃ§Ã£o final do OmniVoice apÃ³s combinar controles estruturados e texto livre.", "Effective OmniVoice instruction after combining structured design controls and freeform instruction.")}
                       >
                         <div class="w-full sm:w-[320px]">
                           <TextField
@@ -1302,7 +1310,7 @@ export const SettingsVoice: Component = () => {
                           />
                         </div>
                       </Row>
-                      <Row title={tx("Sobrescrever velocidade", "Speed override")} description={tx("Velocidade opcional só para este preset.", "Optional speed override for this preset only.")}>
+                      <Row title={tx("Sobrescrever velocidade", "Speed override")} description={tx("Velocidade opcional sÃ³ para este preset.", "Optional speed override for this preset only.")}>
                         <div class="w-full sm:w-[120px]">
                           <TextField
                             type="number"
@@ -1315,7 +1323,7 @@ export const SettingsVoice: Component = () => {
                       </Row>
                     </>
                   </Show>
-                  <Row title={tx("Texto da prévia", "Preview text")} description={tx("Valide rapidamente o preset selecionado sem sair das configurações.", "Quickly validate the selected OmniVoice preset without leaving Settings.")}>
+                  <Row title={tx("Texto da prÃ©via", "Preview text")} description={tx("Valide rapidamente o preset selecionado sem sair das configuraÃ§Ãµes.", "Quickly validate the selected OmniVoice preset without leaving Settings.")}>
                     <div class="flex w-full flex-col gap-3 sm:w-[420px]">
                       <TextField multiline value={preview.text} onChange={(value) => setPreview("text", value)} />
                       <div class="flex items-center gap-2">
@@ -1325,7 +1333,7 @@ export const SettingsVoice: Component = () => {
                           onClick={previewVoice}
                           disabled={preview.busy || (clone() && !item().ref_audio_path)}
                         >
-                          {preview.busy ? tx("Sintetizando", "Synthesizing") : tx("Sintetizar prévia", "Synthesize preview")}
+                          {preview.busy ? tx("Sintetizando", "Synthesizing") : tx("Sintetizar prÃ©via", "Synthesize preview")}
                         </Button>
                         <span class="text-12-regular text-text-weak">{preview.status}</span>
                       </div>
@@ -1333,7 +1341,7 @@ export const SettingsVoice: Component = () => {
                         src={preview.audio}
                         name={`${item().name || "preview"}.wav`}
                         busy={preview.busy}
-                        empty={tx("Sintetize uma prévia para ouvir o preset atual.", "Synthesize a preview to hear the current preset.")}
+                        empty={tx("Sintetize uma previa para ouvir o preset atual.", "Synthesize a preview to hear the current preset.")}
                         note={preview.status}
                       />
                     </div>
@@ -1346,10 +1354,159 @@ export const SettingsVoice: Component = () => {
 
         <Section title={tx("Playback", "Playback")}>
           <SettingsList>
-            <Row title={tx("Mudo", "Mute")} description={tx("Silencia a fala do assistente sem desabilitar a síntese.", "Mute assistant playback without disabling synthesis.")}>
+            <Row
+              title={tx("Modelo da call", "Call model")}
+              description={tx(
+                "Modelo do WhisperX usado na conversa por voz em tempo real. O padrao e small por latencia.",
+                "WhisperX model used by the realtime call flow. Defaults to small for latency.",
+              )}
+            >
+              <Select
+                options={modelOptions()}
+                current={modelOptions().find((item) => item.value === draft.stt.call_model) ?? modelOptions()[0]}
+                value={(item) => item.value}
+                label={(item) => `${item.label} - ${item.state}`}
+                onSelect={(item) => item && setDraft("stt", "call_model", item.value)}
+                variant="secondary"
+                size="small"
+                triggerVariant="settings"
+              />
+            </Row>
+            <Row
+              title={tx("Perfil de pausa", "Pause profile")}
+              description={tx(
+                "Preset base de endpointing da call. Ao trocar o perfil, os tempos abaixo sao atualizados.",
+                "Base call endpointing preset. Changing the profile updates the pause timings below.",
+              )}
+            >
+              <Select
+                options={[...pauses]}
+                current={pauses.find((item) => item.value === draft.stt.call_pause_profile) ?? pauses[0]}
+                value={(item) => item.value}
+                label={(item) => item.label}
+                onSelect={(item) => {
+                  if (!item) return
+                  setDraft("stt", "call_pause_profile", item.value)
+                  if (item.value === "aggressive") {
+                    setDraft("stt", "call_partial_interval_ms", 500)
+                    setDraft("stt", "short_pause_ms", 140)
+                    setDraft("stt", "medium_pause_ms", 320)
+                    setDraft("stt", "long_pause_ms", 700)
+                    return
+                  }
+                  if (item.value === "conservative") {
+                    setDraft("stt", "call_partial_interval_ms", 900)
+                    setDraft("stt", "short_pause_ms", 240)
+                    setDraft("stt", "medium_pause_ms", 600)
+                    setDraft("stt", "long_pause_ms", 1200)
+                    return
+                  }
+                  setDraft("stt", "call_partial_interval_ms", 700)
+                  setDraft("stt", "short_pause_ms", 180)
+                  setDraft("stt", "medium_pause_ms", 450)
+                  setDraft("stt", "long_pause_ms", 900)
+                }}
+                variant="secondary"
+                size="small"
+                triggerVariant="settings"
+              />
+            </Row>
+            <Row
+              title={tx("Parcial da call", "Call partial interval")}
+              description={tx(
+                "Intervalo minimo entre parciais durante a call, em milissegundos.",
+                "Minimum interval between partial call transcriptions, in milliseconds.",
+              )}
+            >
+              <div class="w-full sm:w-[120px]">
+                <TextField
+                  type="number"
+                  value={String(draft.stt.call_partial_interval_ms)}
+                  onChange={(value) => setDraft("stt", "call_partial_interval_ms", Math.max(100, Number(value) || 700))}
+                />
+              </div>
+            </Row>
+            <Row
+              title={tx("Pausa curta", "Short pause")}
+              description={tx("Limite de pausa curta para estabilizar parcial.", "Short pause threshold for partial stabilization.")}
+            >
+              <div class="w-full sm:w-[120px]">
+                <TextField
+                  type="number"
+                  value={String(draft.stt.short_pause_ms)}
+                  onChange={(value) => setDraft("stt", "short_pause_ms", Math.max(60, Number(value) || 180))}
+                />
+              </div>
+            </Row>
+            <Row
+              title={tx("Pausa media", "Medium pause")}
+              description={tx("Limite de pausa media para fechar o turno da fala.", "Medium pause threshold to close the spoken turn.")}
+            >
+              <div class="w-full sm:w-[120px]">
+                <TextField
+                  type="number"
+                  value={String(draft.stt.medium_pause_ms)}
+                  onChange={(value) => setDraft("stt", "medium_pause_ms", Math.max(120, Number(value) || 450))}
+                />
+              </div>
+            </Row>
+            <Row
+              title={tx("Pausa longa", "Long pause")}
+              description={tx("Limite de pausa longa para forcar o fechamento do turno.", "Long pause threshold to force-close the turn.")}
+            >
+              <div class="w-full sm:w-[120px]">
+                <TextField
+                  type="number"
+                  value={String(draft.stt.long_pause_ms)}
+                  onChange={(value) => setDraft("stt", "long_pause_ms", Math.max(240, Number(value) || 900))}
+                />
+              </div>
+            </Row>
+            <Row
+              title={tx("Velocidade da call", "Call speed")}
+              description={tx("Velocidade padrao do OmniVoice na call.", "Default OmniVoice speed during calls.")}
+            >
+              <div class="w-full sm:w-[120px]">
+                <TextField
+                  type="number"
+                  value={String(draft.tts.call_speed)}
+                  onChange={(value) => setDraft("tts", "call_speed", Math.max(0.5, Number(value) || 1))}
+                />
+              </div>
+            </Row>
+            <Row
+              title={tx("Passos da call", "Call steps")}
+              description={tx("Numero de passos do OmniVoice na call. Menor = menos latencia.", "OmniVoice steps during calls. Lower means less latency.")}
+            >
+              <div class="w-full sm:w-[120px]">
+                <TextField
+                  type="number"
+                  value={String(draft.tts.call_num_step)}
+                  onChange={(value) => setDraft("tts", "call_num_step", Math.max(8, Number(value) || 24))}
+                />
+              </div>
+            </Row>
+            <Row
+              title={tx("Remover markdown na call", "Strip markdown in calls")}
+              description={tx("Normaliza listas, titulos e links antes da fala na call.", "Normalizes lists, headings, and links before speech in calls.")}
+            >
+              <Switch checked={draft.tts.call_strip_markdown} onChange={(value) => setDraft("tts", "call_strip_markdown", value)} />
+            </Row>
+            <Row
+              title={tx("Parar ao interromper", "Stop on interruption")}
+              description={tx("Corta a fala da IA quando voce comeca a falar na call.", "Cuts assistant speech when you start talking during a call.")}
+            >
+              <Switch checked={draft.tts.call_stop_on_interrupt} onChange={(value) => setDraft("tts", "call_stop_on_interrupt", value)} />
+            </Row>
+          </SettingsList>
+        </Section>
+
+        <Section title={tx("Playback", "Playback")}>
+          <SettingsList>
+            <Row title={tx("Mudo", "Mute")} description={tx("Silencia a fala do assistente sem desabilitar a sintese.", "Mute assistant playback without disabling synthesis.")}>
               <Switch checked={settings.voice.mute()} onChange={(value) => settings.voice.setMute(value)} />
             </Row>
-            <Row title={tx("Volume", "Volume")} description={tx("Ganho local de reprodução do áudio sintetizado.", "Local playback gain for synthesized assistant audio.")}>
+            <Row title={tx("Volume", "Volume")} description={tx("Ganho local de reproducao do audio sintetizado.", "Local playback gain for synthesized assistant audio.")}>
               <div class="flex items-center gap-3 w-full sm:w-[220px]">
                 <input
                   class="w-full"
@@ -1365,7 +1522,7 @@ export const SettingsVoice: Component = () => {
                 </span>
               </div>
             </Row>
-            <Row title={tx("Dispositivo de entrada", "Input device")} description={tx("Dispositivo preferido de gravação para o botão de microfone do prompt.", "Preferred recording device for the prompt microphone button.")}>
+            <Row title={tx("Dispositivo de entrada", "Input device")} description={tx("Dispositivo preferido de gravacao para o botao de microfone do prompt.", "Preferred recording device for the prompt microphone button.")}>
               <Select
                 options={audio()}
                 current={audio().find((item) => item.value === settings.voice.device())}
@@ -1377,7 +1534,7 @@ export const SettingsVoice: Component = () => {
                 triggerVariant="settings"
               />
             </Row>
-            <Row title={tx("Mostrar timings", "Show timings")} description={tx("Mantém os dados detalhados de tempo visíveis para debug e ferramentas futuras.", "Keep detailed timing data visible for debugging and future karaoke-style tools.")}>
+            <Row title={tx("Mostrar timings", "Show timings")} description={tx("MantÃ©m os dados detalhados de tempo visÃ­veis para debug e ferramentas futuras.", "Keep detailed timing data visible for debugging and future karaoke-style tools.")}>
               <Switch checked={settings.voice.timings()} onChange={(value) => settings.voice.setTimings(value)} />
             </Row>
           </SettingsList>
@@ -1623,7 +1780,7 @@ function AudioCard(props: {
               size="small"
               variant="ghost"
               icon="download"
-              aria-label="Baixar áudio"
+              aria-label="Baixar Ã¡udio"
               onClick={() => props.src && saveAudio(props.src, props.name || "voice.wav")}
             />
           </Show>
@@ -1633,3 +1790,4 @@ function AudioCard(props: {
     </div>
   )
 }
+

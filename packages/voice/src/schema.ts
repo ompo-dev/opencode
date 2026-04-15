@@ -19,6 +19,10 @@ export const voiceTags = [
 
 export const VoiceTag = z.enum(voiceTags).meta({ ref: "VoiceTag" })
 export const VoiceMode = z.enum(["auto", "clone", "design"]).meta({ ref: "VoiceMode" })
+export const VoiceProfile = z.enum(["default", "call"]).meta({ ref: "VoiceProfile" })
+export const VoicePauseProfile = z
+  .enum(["balanced", "aggressive", "conservative"])
+  .meta({ ref: "VoicePauseProfile" })
 export const VoiceDesign = z
   .object({
     gender: z.string().trim().min(1).optional(),
@@ -47,6 +51,7 @@ export const Stt = z
   .object({
     provider: z.literal("whisperx").optional(),
     model: z.string().optional(),
+    call_model: z.string().optional(),
     language: z.string().optional(),
     timestamps: z.enum(["none", "segment", "word"]).optional(),
     diarization: z.boolean().optional(),
@@ -54,6 +59,11 @@ export const Stt = z
     compute_type: z.enum(["float16", "float32", "int8"]).optional(),
     batch_size: z.number().int().positive().optional(),
     beam_size: z.number().int().positive().optional(),
+    call_partial_interval_ms: z.number().int().positive().optional(),
+    call_pause_profile: VoicePauseProfile.optional(),
+    short_pause_ms: z.number().int().positive().optional(),
+    medium_pause_ms: z.number().int().positive().optional(),
+    long_pause_ms: z.number().int().positive().optional(),
   })
   .strict()
   .meta({ ref: "VoiceStt" })
@@ -81,12 +91,17 @@ export const Tts = z
     presets: z.array(Preset).optional(),
     live: z.boolean().optional(),
     autoplay: z.boolean().optional(),
-    chunking: z.enum(["sentence"]).optional(),
+    chunking: z.enum(["sentence", "clause"]).optional(),
     stop_on_interrupt: z.boolean().optional(),
     strip_markdown: z.boolean().optional(),
     speed: z.number().positive().optional(),
     duration: z.number().positive().optional(),
     num_step: z.number().int().positive().optional(),
+    call_speed: z.number().positive().optional(),
+    call_num_step: z.number().int().positive().optional(),
+    call_chunking: z.enum(["sentence", "clause"]).optional(),
+    call_stop_on_interrupt: z.boolean().optional(),
+    call_strip_markdown: z.boolean().optional(),
   })
   .strict()
   .meta({ ref: "VoiceTts" })
@@ -116,6 +131,7 @@ export const SttCfg = z
   .object({
     provider: z.literal("whisperx"),
     model: z.string(),
+    call_model: z.string(),
     language: z.string(),
     timestamps: z.enum(["none", "segment", "word"]),
     diarization: z.boolean(),
@@ -123,6 +139,11 @@ export const SttCfg = z
     compute_type: z.enum(["float16", "float32", "int8"]),
     batch_size: z.number().int().positive(),
     beam_size: z.number().int().positive(),
+    call_partial_interval_ms: z.number().int().positive(),
+    call_pause_profile: VoicePauseProfile,
+    short_pause_ms: z.number().int().positive(),
+    medium_pause_ms: z.number().int().positive(),
+    long_pause_ms: z.number().int().positive(),
   })
   .strict()
   .meta({ ref: "VoiceSttConfig" })
@@ -134,12 +155,17 @@ export const TtsCfg = z
     presets: z.array(Preset),
     live: z.boolean(),
     autoplay: z.boolean(),
-    chunking: z.enum(["sentence"]),
+    chunking: z.enum(["sentence", "clause"]),
     stop_on_interrupt: z.boolean(),
     strip_markdown: z.boolean(),
     speed: z.number().positive(),
     duration: z.number().positive().optional(),
     num_step: z.number().int().positive(),
+    call_speed: z.number().positive(),
+    call_num_step: z.number().int().positive(),
+    call_chunking: z.enum(["sentence", "clause"]),
+    call_stop_on_interrupt: z.boolean(),
+    call_strip_markdown: z.boolean(),
   })
   .strict()
   .meta({ ref: "VoiceTtsConfig" })
@@ -329,6 +355,8 @@ export const TranscribeInput = z
     audio: z.string(),
     language: z.string().optional(),
     diarization: z.boolean().optional(),
+    profile: VoiceProfile.optional(),
+    partial: z.boolean().optional(),
   })
   .strict()
   .meta({ ref: "VoiceTranscribeInput" })
@@ -349,6 +377,8 @@ export const TranscribeOutput = z
 export const SynthesizeInput = z
   .object({
     text: z.string(),
+    profile: VoiceProfile.optional(),
+    rank: z.number().int().nonnegative().optional(),
     preset: z.string().optional(),
     mode: VoiceMode.optional(),
     ref_audio_path: z.string().optional(),
@@ -402,11 +432,17 @@ export function voiceInput(input: {
   config: z.input<typeof ConfigCfg>
   text: string
   preset?: string
+  profile?: z.input<typeof VoiceProfile>
+  num_step?: number
+  rank?: number
 }) {
   const cfg = ConfigCfg.parse(input.config)
   const item = voicePreset(cfg, input.preset)
+  const call = input.profile === "call"
   return SynthesizeInput.parse({
-    text: normalizeSpeechText(input.text, { stripMarkdown: cfg.tts.strip_markdown }),
+    text: normalizeSpeechText(input.text, { stripMarkdown: call ? cfg.tts.call_strip_markdown : cfg.tts.strip_markdown }),
+    profile: input.profile,
+    rank: input.rank,
     mode: item?.mode,
     ref_audio_path: item?.ref_audio_path,
     ref_text: item?.ref_text,
@@ -414,9 +450,9 @@ export function voiceInput(input: {
     design: item?.design,
     tags: item?.tags,
     language: item?.language,
-    speed: item?.speed ?? cfg.tts.speed,
+    speed: item?.speed ?? (call ? cfg.tts.call_speed : cfg.tts.speed),
     duration: cfg.tts.duration,
-    num_step: cfg.tts.num_step,
+    num_step: input.num_step ?? (call ? cfg.tts.call_num_step : cfg.tts.num_step),
   })
 }
 
@@ -495,6 +531,7 @@ export function sttCfg(input?: z.input<typeof Stt>) {
   return SttCfg.parse({
     provider: "whisperx",
     model: "small",
+    call_model: "small",
     language: "auto",
     timestamps: "word",
     diarization: false,
@@ -502,24 +539,41 @@ export function sttCfg(input?: z.input<typeof Stt>) {
     compute_type: "float16",
     batch_size: 8,
     beam_size: 5,
+    call_partial_interval_ms: 700,
+    call_pause_profile: "balanced",
+    short_pause_ms: 180,
+    medium_pause_ms: 420,
+    long_pause_ms: 850,
     ...input,
   })
 }
 
 export function ttsCfg(input?: z.input<typeof Tts>) {
+  const next = input
+    ? {
+        ...input,
+        chunking: input.chunking === "sentence" ? "clause" : input.chunking,
+        call_chunking: input.call_chunking === "sentence" ? "clause" : input.call_chunking,
+      }
+    : undefined
   return TtsCfg.parse({
     provider: "omnivoice",
     default_preset: undefined,
     presets: [],
     live: true,
     autoplay: true,
-    chunking: "sentence",
+    chunking: "clause",
     stop_on_interrupt: true,
     strip_markdown: true,
     speed: 1,
     duration: undefined,
     num_step: 32,
-    ...input,
+    call_speed: 1,
+    call_num_step: 18,
+    call_chunking: "clause",
+    call_stop_on_interrupt: true,
+    call_strip_markdown: true,
+    ...next,
   })
 }
 

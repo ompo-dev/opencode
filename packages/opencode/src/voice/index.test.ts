@@ -122,4 +122,23 @@ describe("resolveSynth", () => {
     expect(out.speed).toBe(1.05)
     expect(out.num_step).toBe(20)
   })
+
+  test("uses the call synthesis profile when requested", () => {
+    const config = voiceCfg({
+      tts: {
+        speed: 1.1,
+        num_step: 30,
+        call_speed: 0.92,
+        call_num_step: 18,
+      },
+    })
+
+    const out = resolveSynth(config, {
+      text: "hello",
+      profile: "call",
+    })
+
+    expect(out.speed).toBe(0.92)
+    expect(out.num_step).toBe(18)
+  })
 })

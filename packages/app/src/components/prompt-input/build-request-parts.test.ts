@@ -75,6 +75,34 @@ describe("buildRequestParts", () => {
     expect(files.map((part) => (part.type === "file" ? part.filename : ""))).toEqual(["a.png", "b.pdf"])
   })
 
+  test("prepends hidden synthetic text without replacing the visible prompt", () => {
+    const result = buildRequestParts({
+      prompt: [{ type: "text", content: "fala comigo", start: 0, end: 11 }],
+      context: [],
+      images: [],
+      text: "fala comigo",
+      hidden: [{ text: "voice call mode", synthetic: true }],
+      messageID: "msg_hidden",
+      sessionID: "ses_hidden",
+      sessionDirectory: "/repo",
+    })
+
+    expect(result.requestParts[0]).toMatchObject({
+      type: "text",
+      text: "voice call mode",
+      synthetic: true,
+    })
+    expect(result.requestParts[1]).toMatchObject({
+      type: "text",
+      text: "fala comigo",
+    })
+    expect(result.optimisticParts[0]).toMatchObject({
+      type: "text",
+      synthetic: true,
+      text: "voice call mode",
+    })
+  })
+
   test("deduplicates context files when prompt already includes same path", () => {
     const prompt: Prompt = [{ type: "file", path: "src/foo.ts", content: "@src/foo.ts", start: 0, end: 11 }]
 

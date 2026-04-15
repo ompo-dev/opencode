@@ -12,6 +12,7 @@ import { SessionPermissionDock } from "@/pages/session/composer/session-permissi
 import { SessionQuestionDock } from "@/pages/session/composer/session-question-dock"
 import { SessionFollowupDock } from "@/pages/session/composer/session-followup-dock"
 import { SessionRevertDock } from "@/pages/session/composer/session-revert-dock"
+import { SessionCallDock } from "@/pages/session/composer/session-call-dock"
 import type { SessionComposerState } from "@/pages/session/composer/session-composer-state"
 import { SessionTodoDock } from "@/pages/session/composer/session-todo-dock"
 import type { FollowupDraft } from "@/components/prompt-input/submit"
@@ -26,6 +27,12 @@ export function SessionComposerRegion(props: {
   onNewSessionWorktreeReset: () => void
   onSubmit: () => void
   onResponseSubmit: () => void
+  call: {
+    active: () => boolean
+    start: () => Promise<void> | void
+    stop: () => Promise<void> | void
+    toggle: () => Promise<void> | void
+  }
   followup?: {
     queue: () => boolean
     items: { id: string; text: string }[]
@@ -246,6 +253,7 @@ export function SessionComposerRegion(props: {
                   onEdit={props.followup!.onEdit}
                 />
               </Show>
+              <SessionCallDock call={props.call} />
               <Show
                 when={child()}
                 fallback={
@@ -260,6 +268,7 @@ export function SessionComposerRegion(props: {
                       onQueue={props.followup?.onQueue}
                       onAbort={props.followup?.onAbort}
                       onSubmit={props.onSubmit}
+                      call={props.call}
                     />
                   </Show>
                 }

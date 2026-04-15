@@ -89,6 +89,12 @@ function lead(input: string, idx: number) {
   return text.split(/\s+/).filter(Boolean).length <= 2
 }
 
+function words(input: string) {
+  return clean(input)
+    .split(/\s+/)
+    .filter(Boolean).length
+}
+
 function head(input: string, done = false) {
   const hits: Array<{ at: number; char: string }> = []
   for (let idx = 0; idx < input.length; idx += 1) {
@@ -105,6 +111,34 @@ function head(input: string, done = false) {
     return hits.at(-2)?.at ?? -1
   }
   return hit.at
+}
+
+function clause(input: string, done = false) {
+  const hits: Array<{ at: number; char: string; soft: boolean }> = []
+  for (let idx = 0; idx < input.length; idx += 1) {
+    const char = input[idx]
+    if (char === "\n") hits.push({ at: idx + 1, char, soft: false })
+    if (".!?;:".includes(char)) {
+      const next = input[idx + 1]
+      if (!next || /\s|\n/.test(next)) hits.push({ at: idx + 1, char, soft: false })
+    }
+    if (",，".includes(char)) {
+      const next = input[idx + 1]
+      if (!next || /\s|\n/.test(next)) hits.push({ at: idx + 1, char, soft: true })
+    }
+  }
+
+  for (const hit of hits) {
+    if (!done && "!?".includes(hit.char) && lead(input, hit.at)) continue
+    if (!hit.soft) return hit.at
+    if (done) return hit.at
+    const text = clean(input.slice(0, hit.at))
+    const count = words(text)
+    const short = count <= 2 && text.length <= 10
+    if (short) return hit.at
+    if (text.length >= 24 || count >= 4) return hit.at
+  }
+  return -1
 }
 
 function soft(input: string, max: number) {
@@ -191,6 +225,62 @@ export class SentenceChunker {
     if (!tail.trim()) return out
 
     const cut = done ? tail.length : soft(tail, this.opts.limit ?? 140)
+    const raw = tail.slice(0, cut)
+    const next = clean(raw)
+    if (!next) return out
+    this.sent += raw
+    out.push(next)
+    return out
+  }
+
+  flush(now = Date.now()) {
+    return this.sync(this.raw, true, now)
+  }
+
+  reset() {
+    this.raw = ""
+    this.sent = ""
+    this.seen = 0
+  }
+}
+
+export class ClauseChunker {
+  private raw = ""
+  private sent = ""
+  private seen = 0
+
+  constructor(
+    private readonly opts: {
+      limit?: number
+      idle?: number
+      stripMarkdown?: boolean
+    } = {},
+  ) {}
+
+  sync(input: string, done = false, now = Date.now()) {
+    const text = normalizeSpeechText(input, { stripMarkdown: this.opts.stripMarkdown })
+    if (text.length > this.raw.length) this.seen = now
+    this.raw = text
+    const same = text.startsWith(this.sent)
+    const base = same ? this.sent : text.slice(0, Math.min(text.length, prefix(text, this.sent)))
+    const out: string[] = []
+    let tail = text.slice(base.length)
+
+    while (true) {
+      const idx = clause(tail, done)
+      if (idx <= 0) break
+      const raw = tail.slice(0, idx)
+      const next = clean(raw)
+      if (next) out.push(next)
+      this.sent = base + tail.slice(0, idx)
+      tail = text.slice(this.sent.length)
+    }
+
+    if (!done && tail.length < (this.opts.limit ?? 96)) return out
+    if (!done && now - this.seen < (this.opts.idle ?? 260)) return out
+    if (!tail.trim()) return out
+
+    const cut = done ? tail.length : soft(tail, this.opts.limit ?? 96)
     const raw = tail.slice(0, cut)
     const next = clean(raw)
     if (!next) return out

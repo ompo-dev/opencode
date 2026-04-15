@@ -32,6 +32,11 @@ export type FollowupDraft = {
   sessionDirectory: string
   prompt: Prompt
   context: (ContextItem & { key: string })[]
+  hidden?: {
+    text: string
+    synthetic?: boolean
+    ignored?: boolean
+  }[]
   agent: string
   model: { providerID: string; modelID: string }
   variant?: string
@@ -110,6 +115,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
     context: input.draft.context,
     images,
     text,
+    hidden: input.draft.hidden,
     sessionID: input.draft.sessionID,
     messageID,
     sessionDirectory: input.draft.sessionDirectory,
@@ -185,6 +191,7 @@ type PromptSubmitInput = {
   onQueue?: (draft: FollowupDraft) => void
   onAbort?: () => void
   onSubmit?: () => void
+  hidden?: () => FollowupDraft["hidden"]
 }
 
 type CommentItem = {
@@ -396,6 +403,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       sessionDirectory,
       prompt: currentPrompt,
       context,
+      hidden: input.hidden?.(),
       agent,
       model,
       variant,

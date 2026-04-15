@@ -172,9 +172,12 @@ export type VoiceRuntimeConfig = {
   hf_token?: string
 }
 
+export type VoicePauseProfile = "balanced" | "aggressive" | "conservative"
+
 export type VoiceSttConfig = {
   provider: "whisperx"
   model: string
+  call_model: string
   language: string
   timestamps: "none" | "segment" | "word"
   diarization: boolean
@@ -182,6 +185,11 @@ export type VoiceSttConfig = {
   compute_type: "float16" | "float32" | "int8"
   batch_size: number
   beam_size: number
+  call_partial_interval_ms: number
+  call_pause_profile: VoicePauseProfile
+  short_pause_ms: number
+  medium_pause_ms: number
+  long_pause_ms: number
 }
 
 export type VoiceMode = "auto" | "clone" | "design"
@@ -229,12 +237,17 @@ export type VoiceTtsConfig = {
   presets: Array<VoicePreset>
   live: boolean
   autoplay: boolean
-  chunking: "sentence"
+  chunking: "sentence" | "clause"
   stop_on_interrupt: boolean
   strip_markdown: boolean
   speed: number
   duration?: number
   num_step: number
+  call_speed: number
+  call_num_step: number
+  call_chunking: "sentence" | "clause"
+  call_stop_on_interrupt: boolean
+  call_strip_markdown: boolean
 }
 
 export type VoiceConfigResolved = {
@@ -351,10 +364,14 @@ export type VoiceTranscribeOutput = {
   raw?: unknown
 }
 
+export type VoiceProfile = "default" | "call"
+
 export type VoiceTranscribeInput = {
   audio: string
   language?: string
   diarization?: boolean
+  profile?: VoiceProfile
+  partial?: boolean
 }
 
 export type VoiceSynthesizeOutput = {
@@ -368,6 +385,8 @@ export type VoiceSynthesizeOutput = {
 
 export type VoiceSynthesizeInput = {
   text: string
+  profile?: VoiceProfile
+  rank?: number
   preset?: string
   mode?: VoiceMode
   ref_audio_path?: string
@@ -1738,6 +1757,7 @@ export type VoiceRuntime = {
 export type VoiceStt = {
   provider?: "whisperx"
   model?: string
+  call_model?: string
   language?: string
   timestamps?: "none" | "segment" | "word"
   diarization?: boolean
@@ -1745,6 +1765,11 @@ export type VoiceStt = {
   compute_type?: "float16" | "float32" | "int8"
   batch_size?: number
   beam_size?: number
+  call_partial_interval_ms?: number
+  call_pause_profile?: VoicePauseProfile
+  short_pause_ms?: number
+  medium_pause_ms?: number
+  long_pause_ms?: number
 }
 
 export type VoiceTts = {
@@ -1753,12 +1778,17 @@ export type VoiceTts = {
   presets?: Array<VoicePreset>
   live?: boolean
   autoplay?: boolean
-  chunking?: "sentence"
+  chunking?: "sentence" | "clause"
   stop_on_interrupt?: boolean
   strip_markdown?: boolean
   speed?: number
   duration?: number
   num_step?: number
+  call_speed?: number
+  call_num_step?: number
+  call_chunking?: "sentence" | "clause"
+  call_stop_on_interrupt?: boolean
+  call_strip_markdown?: boolean
 }
 
 /**

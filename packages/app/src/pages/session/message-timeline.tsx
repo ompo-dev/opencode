@@ -232,6 +232,7 @@ export function MessageTimeline(props: {
   onLoadEarlier: () => void
   renderedUserMessages: UserMessage[]
   anchor: (id: string) => string
+  voiceEnabled?: () => boolean
 }) {
   let touchGesture: number | undefined
 
@@ -385,6 +386,7 @@ export function MessageTimeline(props: {
     cfg: voice,
     mute: settings.voice.mute,
     volume: settings.voice.volume,
+    enabled: () => props.voiceEnabled?.() ?? true,
   })
 
   const [title, setTitle] = createStore({

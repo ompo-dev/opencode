@@ -41,6 +41,7 @@ import { voiceDebug } from "@/context/voice-debug"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
 import { promptEnabled, promptProbe } from "@/testing/prompt"
+import { callHidden } from "@/utils/call"
 import { formatServerError } from "@/utils/server-errors"
 import { createTextFragment, getCursorPosition, setCursorPosition, setRangeEdge } from "./prompt-input/editor-dom"
 import { createPromptAttachments } from "./prompt-input/attachments"
@@ -74,6 +75,12 @@ interface PromptInputProps {
   onQueue?: (draft: FollowupDraft) => void
   onAbort?: () => void
   onSubmit?: () => void
+  call?: {
+    active: () => boolean
+    start: () => Promise<void> | void
+    stop: () => Promise<void> | void
+    toggle: () => Promise<void> | void
+  }
 }
 
 const EXAMPLES = [
@@ -105,6 +112,12 @@ const EXAMPLES = [
 ] as const
 
 const NON_EMPTY_TEXT = /[^\s\u200B]/
+const voiceModes = ["call", "dictation"] as const
+
+function voiceLabel(value: (typeof voiceModes)[number]) {
+  if (value === "call") return "Call"
+  return "Ditado"
+}
 
 export const PromptInput: Component<PromptInputProps> = (props) => {
   const sdk = useSDK()
@@ -214,10 +227,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
     const wantsReview = item.commentOrigin === "review" || (item.commentOrigin !== "file" && commentInReview(item.path))
     if (wantsReview) {
-        if (!view().reviewPanel.opened()) {
-          layout.outline.close()
-          view().reviewPanel.open()
-        }
+      if (!view().reviewPanel.opened()) {
+        layout.outline.close()
+        view().reviewPanel.open()
+      }
       layout.fileTree.setTab("changes")
       tabs().setActive("review")
       queueCommentFocus()
@@ -302,7 +315,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return prompt.context.items().filter((item) => !!item.comment?.trim()).length
   })
   const micBusy = createMemo(() => ["preparing", "recording", "transcribing"].includes(store.mic))
-  const voiceEnabled = createMemo(() => (globalSync.data.config.voice?.runtime?.enabled ?? true) && store.mode === "normal")
+  const voiceMode = createMemo(() => settings.voice.mode())
+  const callMode = createMemo(() => voiceMode() === "call")
+  const voiceEnabled = createMemo(
+    () => (globalSync.data.config.voice?.runtime?.enabled ?? true) && store.mode === "normal",
+  )
   const blank = createMemo(() => {
     const text = prompt
       .current()
@@ -555,12 +572,23 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     }
     const device = settings.voice.device() || undefined
     setStore("mic", "preparing")
-    setStore("micCursor", currentCursor() ?? prompt.cursor() ?? promptLength(prompt.current().filter((part) => part.type !== "image")))
+    setStore(
+      "micCursor",
+      currentCursor() ?? prompt.cursor() ?? promptLength(prompt.current().filter((part) => part.type !== "image")),
+    )
     voiceDebug.mic({
       state: "preparing",
       device,
       error: undefined,
     })
+    void globalSDK.client.global.voice
+      .ensure({
+        voiceEnsureInput: {
+          target: "stt",
+          preload: true,
+        },
+      })
+      .catch(() => undefined)
     try {
       mic = await startPromptRecording({ device })
       setStore("mic", "recording")
@@ -674,8 +702,24 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     void startMic()
   }
 
+  const toggleVoice = () => {
+    if (callMode()) {
+      void props.call?.toggle()
+      return
+    }
+    toggleMic()
+  }
+
   onCleanup(() => {
     void mic?.cancel()
+  })
+
+  createEffect((prev) => {
+    const next = voiceMode()
+    if (prev === "call" && next !== "call" && props.call?.active()) {
+      void props.call.stop()
+    }
+    return next
   })
 
   const renderEditorWithCursor = (parts: Prompt) => {
@@ -1261,6 +1305,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     onQueue: props.onQueue,
     onAbort: props.onAbort,
     onSubmit: props.onSubmit,
+    hidden: () => (props.call?.active() ? [...callHidden()] : undefined),
   })
 
   const handleKeyDown = (event: KeyboardEvent) => {
@@ -1488,7 +1533,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           onMouseDown={(e) => {
             const target = e.target
             if (!(target instanceof HTMLElement)) return
-            if (target.closest('[data-action="prompt-attach"], [data-action="prompt-submit"], [data-action="prompt-mic"]')) {
+            if (
+              target.closest(
+                '[data-action="prompt-attach"], [data-action="prompt-submit"], [data-action="prompt-mic"], [data-action="prompt-voice-mode"]',
+              )
+            ) {
               return
             }
             editorRef?.focus()
@@ -1566,22 +1615,54 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             />
 
             <div class="flex items-center gap-1 pointer-events-auto">
+              <Select
+                options={[...voiceModes]}
+                current={voiceMode()}
+                label={voiceLabel}
+                onSelect={(item) => settings.voice.setMode((item ?? "dictation") as "call" | "dictation")}
+                variant="ghost"
+                size="normal"
+                class="max-w-[92px] text-text-base"
+                valueClass="truncate text-12-regular text-text-base"
+                triggerStyle={{ height: "32px", ...buttons() }}
+                triggerProps={{ type: "button", "data-action": "prompt-voice-mode" }}
+              />
               <Tooltip
                 placement="top"
-                value={store.mic === "recording" ? "Stop recording" : "Record prompt"}
+                value={
+                  callMode()
+                    ? props.call?.active()
+                      ? "Encerrar call"
+                      : "Iniciar call"
+                    : store.mic === "recording"
+                      ? "Parar gravacao"
+                      : "Gravar prompt"
+                }
                 inactive={!voiceEnabled()}
               >
                 <IconButton
                   data-action="prompt-mic"
                   type="button"
-                  disabled={!voiceEnabled() || store.mic === "preparing" || store.mic === "transcribing"}
+                  disabled={
+                    !voiceEnabled() || (!callMode() && (store.mic === "preparing" || store.mic === "transcribing"))
+                  }
                   tabIndex={store.mode === "normal" ? undefined : -1}
-                  icon={store.mic === "recording" ? "stop" : "mic"}
+                  icon={
+                    callMode() ? (props.call?.active() ? "stop" : "mic") : store.mic === "recording" ? "stop" : "mic"
+                  }
                   variant="secondary"
                   class="size-8"
                   style={buttons()}
-                  aria-label={store.mic === "recording" ? "Stop recording" : "Record prompt"}
-                  onClick={toggleMic}
+                  aria-label={
+                    callMode()
+                      ? props.call?.active()
+                        ? "Encerrar call"
+                        : "Iniciar call"
+                      : store.mic === "recording"
+                        ? "Parar gravacao"
+                        : "Gravar prompt"
+                  }
+                  onClick={toggleVoice}
                 />
               </Tooltip>
               <Tooltip placement="top" inactive={!working() && blank()} value={tip()}>

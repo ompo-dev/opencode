@@ -106,6 +106,9 @@ export function createAudioQueue(input?: {
       current.audio.onerror = null
       current.audio.pause()
       current.audio.currentTime = 0
+      current.audio.removeAttribute("src")
+      current.audio.src = ""
+      if (typeof current.audio.load === "function") current.audio.load()
     }
     if (node) {
       node.onended = null

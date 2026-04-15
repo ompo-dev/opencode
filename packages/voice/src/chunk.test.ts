@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { LineChunker, SentenceChunker, normalizeSpeechLines, normalizeSpeechText } from "./chunk"
+import { ClauseChunker, LineChunker, SentenceChunker, normalizeSpeechLines, normalizeSpeechText } from "./chunk"
 
 describe("normalizeSpeechText", () => {
   test("preserves supported tags while stripping markdown", () => {
@@ -44,6 +44,20 @@ describe("SentenceChunker", () => {
     expect(chunk.sync("alpha beta gamma", false, 0)).toEqual([])
     expect(chunk.sync("alpha beta gamma", false, 200)).toEqual(["alpha beta"])
     expect(chunk.flush(300)).toEqual(["gamma"])
+  })
+})
+
+describe("ClauseChunker", () => {
+  test("emits short lead clauses and following clauses progressively", () => {
+    const chunk = new ClauseChunker()
+    expect(chunk.sync("Sim, tenho integração com o Outline.")).toEqual(["Sim,", "tenho integração com o Outline."])
+  })
+
+  test("holds the last unfinished clause until flush", () => {
+    const chunk = new ClauseChunker()
+    expect(chunk.sync("Posso criar e gerenciar documentos,")).toEqual(["Posso criar e gerenciar documentos,"])
+    expect(chunk.sync("Posso criar e gerenciar documentos, mover e renomear")).toEqual([])
+    expect(chunk.flush()).toEqual(["mover e renomear"])
   })
 })
 

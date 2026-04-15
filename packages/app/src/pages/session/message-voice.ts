@@ -1,6 +1,6 @@
 import { showToast } from "@opencode-ai/ui/toast"
 import type { Part, SessionStatus, TextPart } from "@opencode-ai/sdk/v2"
-import { LineChunker, createAudioQueue, type AudioQueueState } from "@opencode-ai/voice"
+import { ClauseChunker, LineChunker, SentenceChunker, createAudioQueue, type AudioQueueState } from "@opencode-ai/voice"
 import { createEffect, onCleanup, type Accessor } from "solid-js"
 import type { useGlobalSDK } from "@/context/global-sdk"
 import { voiceDebug } from "@/context/voice-debug"
@@ -8,7 +8,7 @@ import { formatServerError } from "@/utils/server-errors"
 import { type VoiceConfigResolved, voiceInput } from "@opencode-ai/voice"
 
 const speakable = (part: Part): part is TextPart => part.type === "text" && !part.synthetic && !part.ignored
-type AudioQueue = Pick<ReturnType<typeof createAudioQueue>, "enqueue" | "clear" | "update">
+type AudioQueue = Pick<ReturnType<typeof createAudioQueue>, "enqueue" | "clear" | "update" | "state">
 
 export function joinVoiceText(parts: Part[]) {
   return parts
@@ -21,7 +21,10 @@ export function joinVoiceText(parts: Part[]) {
 export function createVoiceCtrl(input: {
   enabled: () => boolean
   strip: () => boolean
-  synth: (text: string) => Promise<string | undefined>
+  chunk?: "line" | "sentence" | "clause"
+  width?: number
+  ahead?: number
+  synth: (text: string, meta: { seq: number; rank: number; effort: number }) => Promise<string | undefined>
   note?: (error: unknown) => void
   event?: (input: { type: "start" | "queue" | "drop" | "error"; msg: string; text: string; error?: unknown }) => void
   queue: AudioQueue
@@ -36,6 +39,16 @@ export function createVoiceCtrl(input: {
   let chunk = make()
 
   function make() {
+    if (input.chunk === "clause") {
+      return new ClauseChunker({
+        stripMarkdown: input.strip(),
+      })
+    }
+    if (input.chunk === "sentence") {
+      return new SentenceChunker({
+        stripMarkdown: input.strip(),
+      })
+    }
     return new LineChunker({
       stripMarkdown: input.strip(),
     })
@@ -77,20 +90,29 @@ export function createVoiceCtrl(input: {
   }
 
   const pump = (now: number) => {
-    while (run < 2 && todo.length > 0) {
+    while (run < (input.width ?? 2) && todo.length > 0) {
+      const span = input.ahead ?? 3
+      const load = input.queue.state().pending + out.size + run
+      if (load >= span) return
       const item = todo.shift()
       if (!item) return
       const at = seq
       seq += 1
       run += 1
       const id = msg
+      const rank = Math.max(0, at - ack)
+      const effort = Math.max(0.125, 1 / 2 ** rank)
       input.event?.({
         type: "start",
         msg: id,
         text: item,
       })
       void input
-        .synth(item)
+        .synth(item, {
+          seq: at,
+          rank,
+          effort,
+        })
         .then((audio) => {
           run -= 1
           if (now !== rev || !input.enabled()) {
@@ -154,9 +176,13 @@ export function createVoiceCtrl(input: {
       if (!input.enabled() || !msg) return
       push(chunk.flush(), rev)
     },
+    tick() {
+      pump(rev)
+    },
     stop,
     update() {
       input.queue.update()
+      pump(rev)
     },
   }
 }
@@ -171,14 +197,23 @@ export function createMessageVoice(input: {
   cfg: Accessor<VoiceConfigResolved>
   mute: Accessor<boolean>
   volume: Accessor<number>
+  enabled?: Accessor<boolean>
 }) {
   let bad = false
-  let warm = false
   let live = ""
   let busy = ""
   let done = ""
+  let mute = ""
+  let warm = ""
   let wait: ReturnType<typeof setTimeout> | undefined
+  let sync: ReturnType<typeof setTimeout> | undefined
+  let next = {
+    msg: "",
+    text: "",
+    done: false,
+  }
   const preset = () => input.cfg().tts.default_preset ?? input.cfg().tts.presets[0]?.id
+  let ctrl: ReturnType<typeof createVoiceCtrl> | undefined
   const queue = createAudioQueue({
     prefer: "htmlaudio",
     muted: input.mute,
@@ -192,6 +227,7 @@ export function createMessageVoice(input: {
         volume: state.volume,
         error: state.error,
       })
+      ctrl?.tick()
     },
   })
   const clear = () => {
@@ -199,15 +235,36 @@ export function createMessageVoice(input: {
     clearTimeout(wait)
     wait = undefined
   }
-  const enabled = () => input.cfg().runtime.enabled && input.cfg().tts.autoplay
+  const clearSync = () => {
+    if (sync === undefined) return
+    clearTimeout(sync)
+    sync = undefined
+  }
+  const push = (msg: string, text: string, done = false) => {
+    next = { msg, text, done }
+    if (done) {
+      clearSync()
+      ctrl?.sync(next)
+      return
+    }
+    if (sync !== undefined) return
+    sync = setTimeout(() => {
+      sync = undefined
+      if (!next.msg) return
+      ctrl?.sync(next)
+    }, 220)
+  }
+  const enabled = () => (input.enabled ? input.enabled() : true) && input.cfg().runtime.enabled && input.cfg().tts.autoplay
   const liveEnabled = () => enabled() && input.cfg().tts.live
-  const speak = (text: string) =>
+  const speak = (text: string, meta: { seq: number; rank: number; effort: number }) =>
     input.globalSDK.client.global.voice
       .synthesize({
         voiceSynthesizeInput: voiceInput({
           config: input.cfg(),
           text,
           preset: preset(),
+          rank: meta.rank,
+          num_step: Math.max(8, Math.round(input.cfg().tts.num_step * meta.effort)),
         }),
       })
       .then((res) => {
@@ -221,9 +278,12 @@ export function createMessageVoice(input: {
         })
         return res.data?.audio
       })
-  const ctrl = createVoiceCtrl({
+  ctrl = createVoiceCtrl({
     enabled: liveEnabled,
     strip: () => input.cfg().tts.strip_markdown,
+    chunk: "clause",
+    width: 1,
+    ahead: 2,
     queue,
     synth: speak,
     note: (error) => {
@@ -261,6 +321,7 @@ export function createMessageVoice(input: {
   const plan = (msg?: string, text?: string) => {
     clear()
     if (!enabled() || !msg || !text?.trim()) return
+    if (mute && mute === msg) return
     const key = `${msg}\n${text}`
     if (done === key) return
     wait = setTimeout(async () => {
@@ -279,7 +340,11 @@ export function createMessageVoice(input: {
         text,
         error: undefined,
       })
-      const audio = await speak(text).catch((error) => {
+      const audio = await speak(text, {
+        seq: 0,
+        rank: 0,
+        effort: 1,
+      }).catch((error) => {
         ctrl.stop()
         throw error
       })
@@ -287,7 +352,7 @@ export function createMessageVoice(input: {
       if (input.msg() !== msg) return
       done = key
       queue.enqueue(audio)
-    }, liveEnabled() ? 2400 : 0)
+    }, liveEnabled() ? 900 : 0)
   }
 
   createEffect(() => {
@@ -296,27 +361,21 @@ export function createMessageVoice(input: {
     ctrl.update()
   })
 
-  createEffect(() => {
-    if (warm) return
-    if (!input.cfg().runtime.enabled) return
-    warm = true
-    void input.globalSDK.client.global.voice
-      .ensure({
-        voiceEnsureInput: {
-          preload: true,
-        },
-      })
-      .catch(() => undefined)
-  })
-
   createEffect((prev) => {
     const next = input.msg()
+    if (!prev && next) {
+      mute = next
+      return next
+    }
     if (prev && prev !== next) {
       clear()
+      clearSync()
       live = ""
       busy = ""
       done = ""
+      warm = ""
     }
+    if (next && next !== mute) mute = ""
     return next
   })
 
@@ -324,9 +383,12 @@ export function createMessageVoice(input: {
     const next = input.session()
     if (prev && prev !== next) {
       clear()
+      clearSync()
       live = ""
       busy = ""
       done = ""
+      mute = ""
+      warm = ""
       ctrl.stop()
     }
     return next
@@ -336,9 +398,12 @@ export function createMessageVoice(input: {
     const next = input.turn()
     if (prev && next && prev !== next && input.cfg().tts.stop_on_interrupt) {
       clear()
+      clearSync()
       live = ""
       busy = ""
       done = ""
+      mute = ""
+      warm = ""
       ctrl.stop()
       voiceDebug.tts({
         state: "idle",
@@ -351,31 +416,59 @@ export function createMessageVoice(input: {
   createEffect(() => {
     const msg = input.msg()
     if (!msg) return
+    if (warm === msg) return
+    if (!enabled()) return
+    if (input.status().type === "idle") return
+    warm = msg
+    void input.globalSDK.client.global.voice
+      .ensure({
+        voiceEnsureInput: {
+          target: "tts",
+          preload: true,
+        },
+      })
+      .catch(() => undefined)
+  })
+
+  createEffect(() => {
+    const msg = input.msg()
+    if (!msg) return
     const text = joinVoiceText(input.parts())
+    if (mute && mute === msg && input.status().type === "idle") {
+      voiceDebug.tts({
+        state: "idle",
+        error: undefined,
+      })
+      return
+    }
+    if (liveEnabled()) {
+      push(msg, text)
+      return
+    }
     voiceDebug.tts({
       state: text.trim() ? "running" : "idle",
       preset: preset(),
       text,
       error: undefined,
     })
-    if (liveEnabled()) {
-      ctrl.sync({
-        msg,
-        text,
-      })
-      return
-    }
     ctrl.stop()
   })
 
   createEffect((prev) => {
     const next = input.status().type
-    if (prev !== "idle" && next === "idle") ctrl.flush()
+    if (prev !== "idle" && next === "idle") {
+      clearSync()
+      const msg = input.msg()
+      if (msg) ctrl.sync({ msg, text: joinVoiceText(input.parts()), done: true })
+      ctrl.flush()
+    }
     if (!enabled()) {
       clear()
+      clearSync()
       live = ""
       busy = ""
       done = ""
+      mute = input.msg() ?? ""
       ctrl.stop()
       voiceDebug.tts({
         state: "idle",
@@ -389,11 +482,13 @@ export function createMessageVoice(input: {
     const msg = input.msg()
     if (!msg) return
     if (input.status().type !== "idle") return
+    if (mute && mute === msg) return
     plan(msg, joinVoiceText(input.parts()))
   })
 
   onCleanup(() => {
     clear()
+    clearSync()
     ctrl.stop()
     queue.dispose()
     voiceDebug.tts({
