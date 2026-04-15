@@ -18,6 +18,7 @@ import { useLayout } from "@/context/layout"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { useComments } from "@/context/comments"
+import { showToast } from "@opencode-ai/ui/toast"
 import { Button } from "@opencode-ai/ui/button"
 import { DockShellForm, DockTray } from "@opencode-ai/ui/dock-surface"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -33,9 +34,14 @@ import { Persist, persisted } from "@/utils/persist"
 import { usePermission } from "@/context/permission"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
+import { useSettings } from "@/context/settings"
+import { useGlobalSDK } from "@/context/global-sdk"
+import { useGlobalSync } from "@/context/global-sync"
+import { voiceDebug } from "@/context/voice-debug"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
 import { promptEnabled, promptProbe } from "@/testing/prompt"
+import { formatServerError } from "@/utils/server-errors"
 import { createTextFragment, getCursorPosition, setCursorPosition, setRangeEdge } from "./prompt-input/editor-dom"
 import { createPromptAttachments } from "./prompt-input/attachments"
 import { ACCEPTED_FILE_TYPES } from "./prompt-input/files"
@@ -49,6 +55,7 @@ import {
   promptLength,
 } from "./prompt-input/history"
 import { createPromptSubmit, type FollowupDraft } from "./prompt-input/submit"
+import { insertPromptText, startPromptRecording } from "./prompt-input/voice"
 import { PromptPopover, type AtOption, type SlashCommand } from "./prompt-input/slash-popover"
 import { PromptContextItems } from "./prompt-input/context-items"
 import { PromptImageAttachments } from "./prompt-input/image-attachments"
@@ -101,6 +108,8 @@ const NON_EMPTY_TEXT = /[^\s\u200B]/
 
 export const PromptInput: Component<PromptInputProps> = (props) => {
   const sdk = useSDK()
+  const globalSDK = useGlobalSDK()
+  const globalSync = useGlobalSync()
   const sync = useSync()
   const local = useLocal()
   const files = useFile()
@@ -113,11 +122,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const permission = usePermission()
   const language = useLanguage()
   const platform = usePlatform()
+  const settings = useSettings()
   const { params, tabs, view } = useSessionLayout()
   let editorRef!: HTMLDivElement
   let fileInputRef: HTMLInputElement | undefined
   let scrollRef!: HTMLDivElement
   let slashPopoverRef!: HTMLDivElement
+  let mic: Awaited<ReturnType<typeof startPromptRecording>> | undefined
 
   const mirror = { input: false }
   const inset = 56
@@ -261,6 +272,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     draggingType: "image" | "@mention" | null
     mode: "normal" | "shell"
     applyingHistory: boolean
+    mic: "idle" | "preparing" | "recording" | "transcribing" | "error"
+    micCursor: number
   }>({
     popover: null,
     historyIndex: -1,
@@ -269,6 +282,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     draggingType: null,
     mode: "normal",
     applyingHistory: false,
+    mic: "idle",
+    micCursor: 0,
   })
 
   const buttonsSpring = useSpring(() => (store.mode === "normal" ? 1 : 0), { visualDuration: 0.2, bounce: 0 })
@@ -286,6 +301,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     if (store.mode === "shell") return 0
     return prompt.context.items().filter((item) => !!item.comment?.trim()).length
   })
+  const micBusy = createMemo(() => ["preparing", "recording", "transcribing"].includes(store.mic))
+  const voiceEnabled = createMemo(() => (globalSync.data.config.voice?.runtime?.enabled ?? true) && store.mode === "normal")
   const blank = createMemo(() => {
     const text = prompt
       .current()
@@ -524,6 +541,142 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       queueScroll()
     })
   }
+
+  const voiceError = (error: unknown) => {
+    const message = formatServerError(error, undefined, "Voice request failed")
+    showToast({ title: "Voice failed", description: message })
+    return message
+  }
+
+  const startMic = async () => {
+    if (!voiceEnabled()) {
+      showToast({ title: "Voice disabled", description: "Enable local voice in Settings > Voice." })
+      return
+    }
+    const device = settings.voice.device() || undefined
+    setStore("mic", "preparing")
+    setStore("micCursor", currentCursor() ?? prompt.cursor() ?? promptLength(prompt.current().filter((part) => part.type !== "image")))
+    voiceDebug.mic({
+      state: "preparing",
+      device,
+      error: undefined,
+    })
+    try {
+      mic = await startPromptRecording({ device })
+      setStore("mic", "recording")
+      voiceDebug.mic({
+        state: "recording",
+        device,
+        error: undefined,
+      })
+    } catch (error) {
+      mic = undefined
+      setStore("mic", "error")
+      const message = voiceError(error)
+      voiceDebug.mic({
+        state: "error",
+        device,
+        error: message,
+      })
+    }
+  }
+
+  const stopMic = async () => {
+    const rec = mic
+    if (!rec) return
+    mic = undefined
+    setStore("mic", "transcribing")
+    voiceDebug.mic({
+      state: "transcribing",
+      error: undefined,
+    })
+    voiceDebug.stt({
+      state: "running",
+      error: undefined,
+    })
+    try {
+      const clip = await rec.stop()
+      voiceDebug.mic({
+        state: "transcribing",
+        duration_ms: clip.duration_ms,
+        peak: clip.peak,
+      })
+      const lang = globalSync.data.config.voice?.stt?.language
+      const res = await globalSDK.client.global.voice.transcribe({
+        voiceTranscribeInput: {
+          audio: clip.audio,
+          language: lang && lang !== "auto" ? lang : undefined,
+          diarization: globalSync.data.config.voice?.stt?.diarization,
+        },
+      })
+      const text = res.data?.text?.trim()
+      if (text) {
+        const next = insertPromptText(prompt.current(), text, store.micCursor)
+        prompt.set(next.prompt, next.cursor)
+        voiceDebug.stt({
+          state: "ready",
+          audio_ms: clip.duration_ms,
+          duration_ms: res.data?.duration_ms,
+          words: res.data?.words.length,
+          segments: res.data?.segments.length,
+          text,
+          error: undefined,
+        })
+        requestAnimationFrame(() => {
+          editorRef.focus()
+          setCursorPosition(editorRef, next.cursor)
+          queueScroll()
+        })
+      } else {
+        voiceDebug.stt({
+          state: "empty",
+          audio_ms: clip.duration_ms,
+          duration_ms: res.data?.duration_ms,
+          words: res.data?.words.length,
+          segments: res.data?.segments.length,
+          error: undefined,
+        })
+        showToast({
+          title: "No speech detected",
+          description:
+            clip.peak < 0.001
+              ? "The microphone captured silence. Check the selected input device."
+              : "WhisperX did not return any text for this recording.",
+        })
+      }
+      setStore("mic", "idle")
+      voiceDebug.mic({
+        state: "idle",
+        duration_ms: clip.duration_ms,
+        peak: clip.peak,
+        error: undefined,
+      })
+    } catch (error) {
+      setStore("mic", "error")
+      const message = voiceError(error)
+      voiceDebug.mic({
+        state: "error",
+        error: message,
+      })
+      voiceDebug.stt({
+        state: "error",
+        error: message,
+      })
+    }
+  }
+
+  const toggleMic = () => {
+    if (store.mic === "recording") {
+      void stopMic()
+      return
+    }
+    if (micBusy()) return
+    void startMic()
+  }
+
+  onCleanup(() => {
+    void mic?.cancel()
+  })
 
   const renderEditorWithCursor = (parts: Prompt) => {
     const cursor = currentCursor()
@@ -1154,6 +1307,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         return
       }
 
+      if (store.mic === "recording") {
+        void stopMic()
+        event.preventDefault()
+        event.stopPropagation()
+        return
+      }
+
       if (store.mode === "shell") {
         setStore("mode", "normal")
         event.preventDefault()
@@ -1328,7 +1488,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           onMouseDown={(e) => {
             const target = e.target
             if (!(target instanceof HTMLElement)) return
-            if (target.closest('[data-action="prompt-attach"], [data-action="prompt-submit"]')) {
+            if (target.closest('[data-action="prompt-attach"], [data-action="prompt-submit"], [data-action="prompt-mic"]')) {
               return
             }
             editorRef?.focus()
@@ -1406,11 +1566,29 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             />
 
             <div class="flex items-center gap-1 pointer-events-auto">
+              <Tooltip
+                placement="top"
+                value={store.mic === "recording" ? "Stop recording" : "Record prompt"}
+                inactive={!voiceEnabled()}
+              >
+                <IconButton
+                  data-action="prompt-mic"
+                  type="button"
+                  disabled={!voiceEnabled() || store.mic === "preparing" || store.mic === "transcribing"}
+                  tabIndex={store.mode === "normal" ? undefined : -1}
+                  icon={store.mic === "recording" ? "stop" : "mic"}
+                  variant="secondary"
+                  class="size-8"
+                  style={buttons()}
+                  aria-label={store.mic === "recording" ? "Stop recording" : "Record prompt"}
+                  onClick={toggleMic}
+                />
+              </Tooltip>
               <Tooltip placement="top" inactive={!working() && blank()} value={tip()}>
                 <IconButton
                   data-action="prompt-submit"
                   type="submit"
-                  disabled={store.mode !== "normal" || (!working() && blank())}
+                  disabled={store.mode !== "normal" || (!working() && blank()) || micBusy()}
                   tabIndex={store.mode === "normal" ? undefined : -1}
                   icon={stopping() ? "stop" : "arrow-up"}
                   variant="primary"

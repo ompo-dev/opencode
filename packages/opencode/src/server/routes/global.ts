@@ -13,6 +13,7 @@ import { lazy } from "../../util/lazy"
 import { Config } from "../../config/config"
 import { errors } from "../error"
 import { GlobalKanbanRoutes } from "./kanban"
+import { GlobalVoiceRoutes } from "./global-voice"
 
 const log = Log.create({ service: "server" })
 
@@ -92,6 +93,7 @@ export const GlobalRoutes = lazy(() =>
       },
     )
     .route("/kanban", GlobalKanbanRoutes())
+    .route("/voice", GlobalVoiceRoutes())
     .get(
       "/event",
       describeRoute({

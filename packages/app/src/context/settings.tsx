@@ -41,6 +41,12 @@ export interface Settings {
   }
   notifications: NotificationSettings
   sounds: SoundSettings
+  voice: {
+    mute: boolean
+    volume: number
+    device: string
+    timings: boolean
+  }
 }
 
 export const monoDefault = "System Mono"
@@ -117,6 +123,12 @@ const defaultSettings: Settings = {
     permissions: "staplebops-02",
     errorsEnabled: true,
     errors: "nope-03",
+  },
+  voice: {
+    mute: false,
+    volume: 1,
+    device: "",
+    timings: false,
   },
 }
 
@@ -268,6 +280,24 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         errors: withFallback(() => store.sounds?.errors, defaultSettings.sounds.errors),
         setErrors(value: string) {
           setStore("sounds", "errors", value)
+        },
+      },
+      voice: {
+        mute: withFallback(() => store.voice?.mute, defaultSettings.voice.mute),
+        setMute(value: boolean) {
+          setStore("voice", "mute", value)
+        },
+        volume: withFallback(() => store.voice?.volume, defaultSettings.voice.volume),
+        setVolume(value: number) {
+          setStore("voice", "volume", Math.max(0, Math.min(1, value)))
+        },
+        device: withFallback(() => store.voice?.device, defaultSettings.voice.device),
+        setDevice(value: string) {
+          setStore("voice", "device", value)
+        },
+        timings: withFallback(() => store.voice?.timings, defaultSettings.voice.timings),
+        setTimings(value: boolean) {
+          setStore("voice", "timings", value)
         },
       },
     }

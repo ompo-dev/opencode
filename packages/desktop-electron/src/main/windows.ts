@@ -92,6 +92,7 @@ export function createMainWindow(globals: Globals) {
   state.manage(win)
   loadWindow(win, "index.html")
   wireZoom(win)
+  wirePermissions(win)
   injectGlobals(win, globals)
 
   return win
@@ -122,6 +123,7 @@ export function createLoadingWindow(globals: Globals) {
   })
 
   loadWindow(win, "loading.html")
+  wirePermissions(win)
   injectGlobals(win, globals)
 
   return win
@@ -155,5 +157,25 @@ function wireZoom(win: BrowserWindow) {
   win.webContents.setZoomFactor(1)
   win.webContents.on("zoom-changed", () => {
     win.webContents.setZoomFactor(1)
+  })
+}
+
+const media = (details?: unknown) => {
+  if (!details || typeof details !== "object") return []
+  if (!("mediaTypes" in details)) return []
+  const value = details.mediaTypes
+  return Array.isArray(value) ? value : []
+}
+
+const allowMic = (permission: string, details?: unknown) => {
+  if (permission !== "media") return false
+  const types = media(details)
+  return types.includes("audio") && !types.includes("video")
+}
+
+const wirePermissions = (win: BrowserWindow) => {
+  win.webContents.session.setPermissionCheckHandler((_wc, permission, _origin, details) => allowMic(permission, details))
+  win.webContents.session.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    callback(allowMic(permission, details))
   })
 }

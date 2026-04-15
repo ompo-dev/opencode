@@ -4,6 +4,7 @@ import { createStore } from "solid-js/store"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { useLanguage } from "@/context/language"
+import { voiceDebug } from "@/context/voice-debug"
 
 type Mem = Performance & {
   memory?: {
@@ -50,6 +51,20 @@ const bad = (n: number | undefined, limit: number, low = false) => {
 }
 
 const session = (path: string) => path.includes("/session")
+const short = (value: string) => (value.length > 14 ? `${value.slice(0, 11)}...` : value)
+const stateText = (value: string) => {
+  if (value === "recording") return "REC"
+  if (value === "transcribing") return "STT"
+  if (value === "preparing") return "PREP"
+  if (value === "running") return "RUN"
+  if (value === "playing") return "PLAY"
+  if (value === "loading") return "LOAD"
+  if (value === "blocked") return "WAIT"
+  if (value === "ready") return "OK"
+  if (value === "empty") return "EMPTY"
+  if (value === "error") return "ERR"
+  return value === "idle" ? "--" : value.toUpperCase()
+}
 
 function Cell(props: { bad?: boolean; dim?: boolean; label: string; tip: string; value: string; wide?: boolean }) {
   return (
@@ -110,6 +125,31 @@ export function DebugBar() {
   }
   const longv = () => (state.long.count === undefined ? na() : `${time(state.long.block) ?? na()}/${state.long.count}`)
   const navv = () => (state.nav.pending ? "..." : (time(state.nav.dur) ?? na()))
+  const mic = () => voiceDebug.state.mic
+  const stt = () => voiceDebug.state.stt
+  const tts = () => voiceDebug.state.tts
+  const queue = () => voiceDebug.state.queue
+  const micv = () =>
+    mic().state === "idle" && mic().duration_ms ? (time(mic().duration_ms) ?? na()) : stateText(mic().state)
+  const sttv = () => {
+    if (stt().state === "ready") return `${stt().words ?? 0}w`
+    if (stt().state === "empty") return "0w"
+    return stateText(stt().state)
+  }
+  const ttsv = () => {
+    if (tts().state === "ready") return time(tts().duration_ms) ?? "OK"
+    if (tts().state === "empty") return "0ms"
+    return stateText(tts().state)
+  }
+  const queuev = () => {
+    if (queue().state === "playing") return `${queue().pending}`
+    if (queue().pending > 0) return `${queue().pending}`
+    return stateText(queue().state)
+  }
+  const outv = () => {
+    if (queue().mode === "none") return "--"
+    return `${queue().mode === "webaudio" ? "WA" : "EL"} ${Math.round(queue().volume * 100)}`
+  }
 
   let prev = ""
   let start = 0
@@ -363,9 +403,9 @@ export function DebugBar() {
   return (
     <aside
       aria-label={language.t("debugBar.ariaLabel")}
-      class="pointer-events-auto fixed bottom-3 right-3 z-50 w-[308px] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl border border-border-base bg-surface-raised-stronger-non-alpha p-0.5 text-text-strong shadow-[var(--shadow-lg-border-base)] sm:bottom-4 sm:right-4 sm:w-[324px]"
+      class="h-fit pointer-events-auto fixed bottom-3 right-3 z-50 w-[308px] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl border border-border-base bg-surface-raised-stronger-non-alpha p-0.5 text-text-strong shadow-[var(--shadow-lg-border-base)] sm:bottom-4 sm:right-4 sm:w-[324px]"
     >
-      <div class="grid grid-cols-5 gap-px font-mono">
+      <div class="grid grid-cols-5 gap-px font-mono h-full">
         <Cell
           label={language.t("debugBar.nav.label")}
           tip={language.t("debugBar.nav.tip")}
@@ -436,6 +476,82 @@ export function DebugBar() {
           bad={bad(heap(), 0.8)}
           dim={state.heap.used === undefined}
           wide
+        />
+
+        <Cell
+          label="MIC"
+          tip={[
+            `state: ${mic().state}`,
+            mic().device ? `device: ${mic().device}` : undefined,
+            mic().duration_ms !== undefined ? `audio: ${ms(mic().duration_ms) ?? na()}` : undefined,
+            mic().peak !== undefined ? `peak: ${(mic().peak ?? 0).toFixed(4)}` : undefined,
+            mic().error,
+          ]
+            .filter(Boolean)
+            .join("\n")}
+          value={micv()}
+          bad={mic().state === "error"}
+          dim={mic().at === 0}
+        />
+        <Cell
+          label="STT"
+          tip={[
+            `state: ${stt().state}`,
+            stt().audio_ms !== undefined ? `clip: ${ms(stt().audio_ms) ?? na()}` : undefined,
+            stt().duration_ms !== undefined ? `result: ${ms(stt().duration_ms) ?? na()}` : undefined,
+            stt().segments !== undefined ? `segments: ${stt().segments}` : undefined,
+            stt().words !== undefined ? `words: ${stt().words}` : undefined,
+            stt().text ? `text: ${stt().text}` : undefined,
+            stt().error,
+          ]
+            .filter(Boolean)
+            .join("\n")}
+          value={sttv()}
+          bad={stt().state === "error"}
+          dim={stt().at === 0}
+        />
+        <Cell
+          label="TTS"
+          tip={[
+            `state: ${tts().state}`,
+            tts().preset ? `preset: ${tts().preset}` : undefined,
+            tts().duration_ms !== undefined ? `audio: ${ms(tts().duration_ms) ?? na()}` : undefined,
+            tts().text ? `text: ${tts().text}` : undefined,
+            tts().error,
+          ]
+            .filter(Boolean)
+            .join("\n")}
+          value={ttsv()}
+          bad={tts().state === "error"}
+          dim={tts().at === 0}
+        />
+        <Cell
+          label="QUEUE"
+          tip={[
+            `state: ${queue().state}`,
+            `pending: ${queue().pending}`,
+            queue().mode !== "none" ? `mode: ${queue().mode}` : undefined,
+            queue().error,
+          ]
+            .filter(Boolean)
+            .join("\n")}
+          value={queuev()}
+          bad={queue().state === "error" || queue().state === "blocked"}
+          dim={queue().at === 0}
+        />
+        <Cell
+          label="OUT"
+          tip={[
+            `mode: ${queue().mode}`,
+            `mute: ${queue().muted ? "on" : "off"}`,
+            `volume: ${Math.round(queue().volume * 100)}%`,
+            queue().error ? `last: ${short(queue().error ?? "")}` : undefined,
+          ]
+            .filter(Boolean)
+            .join("\n")}
+          value={outv()}
+          bad={queue().mode === "none"}
+          dim={queue().at === 0}
         />
       </div>
     </aside>

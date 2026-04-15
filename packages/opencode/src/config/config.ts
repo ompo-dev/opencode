@@ -41,6 +41,7 @@ import { Duration, Effect, Layer, Option, ServiceMap } from "effect"
 import { Flock } from "@/util/flock"
 import { isPathPluginSpec, parsePluginSpecifier, resolvePathPluginTarget } from "@/plugin/shared"
 import { Npm } from "@/npm"
+import { VoiceSchema } from "@opencode-ai/voice/schema"
 
 export namespace Config {
   const ModelId = z.string().meta({ $ref: "https://models.dev/model-schema.json#/$defs/Model" })
@@ -992,6 +993,7 @@ export namespace Config {
         .record(z.string(), Provider)
         .optional()
         .describe("Custom provider configurations and model overrides"),
+      voice: VoiceSchema.optional().describe("Local voice runtime configuration for STT and TTS"),
       mcp: z
         .record(
           z.string(),

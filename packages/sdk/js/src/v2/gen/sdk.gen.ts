@@ -57,6 +57,17 @@ import type {
   GlobalSyncEventSubscribeResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
+  GlobalVoiceAssetErrors,
+  GlobalVoiceAssetResponses,
+  GlobalVoiceEnsureErrors,
+  GlobalVoiceEnsureResponses,
+  GlobalVoiceReferenceErrors,
+  GlobalVoiceReferenceResponses,
+  GlobalVoiceStatusResponses,
+  GlobalVoiceSynthesizeErrors,
+  GlobalVoiceSynthesizeResponses,
+  GlobalVoiceTranscribeErrors,
+  GlobalVoiceTranscribeResponses,
   InstanceDisposeResponses,
   KanbanGetResponses,
   KanbanOperation,
@@ -210,6 +221,11 @@ import type {
   VcsSuggestResponses,
   VcsSyncResponses,
   VcsUnstageResponses,
+  VoiceAssetInput,
+  VoiceEnsureInput,
+  VoiceReferenceInput,
+  VoiceSynthesizeInput,
+  VoiceTranscribeInput,
   WorktreeCreateErrors,
   WorktreeCreateInput,
   WorktreeCreateResponses,
@@ -292,6 +308,152 @@ export class Kanban extends HeyApiClient {
     const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "operations" }] }])
     return (options?.client ?? this.client).patch<GlobalKanbanUpdateResponses, unknown, ThrowOnError>({
       url: "/global/kanban",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Voice extends HeyApiClient {
+  /**
+   * Get voice runtime status
+   *
+   * Retrieve the current local voice runtime status, paths, configuration, and readiness.
+   */
+  public status<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalVoiceStatusResponses, unknown, ThrowOnError>({
+      url: "/global/voice/status",
+      ...options,
+    })
+  }
+
+  /**
+   * Ensure voice runtime
+   *
+   * Install and initialize the local voice runtime, Python environment, ffmpeg, and models.
+   */
+  public ensure<ThrowOnError extends boolean = false>(
+    parameters?: {
+      voiceEnsureInput?: VoiceEnsureInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "voiceEnsureInput", map: "body" }] }])
+    return (options?.client ?? this.client).post<GlobalVoiceEnsureResponses, GlobalVoiceEnsureErrors, ThrowOnError>({
+      url: "/global/voice/ensure",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Load reference asset
+   *
+   * Read a local reference audio file and return it as a data URL for playback in the app.
+   */
+  public asset<ThrowOnError extends boolean = false>(
+    parameters?: {
+      voiceAssetInput?: VoiceAssetInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "voiceAssetInput", map: "body" }] }])
+    return (options?.client ?? this.client).post<GlobalVoiceAssetResponses, GlobalVoiceAssetErrors, ThrowOnError>({
+      url: "/global/voice/asset",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Store reference audio
+   *
+   * Persist a reference voice clip for OmniVoice presets and optionally auto-transcribe it.
+   */
+  public reference<ThrowOnError extends boolean = false>(
+    parameters?: {
+      voiceReferenceInput?: VoiceReferenceInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "voiceReferenceInput", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      GlobalVoiceReferenceResponses,
+      GlobalVoiceReferenceErrors,
+      ThrowOnError
+    >({
+      url: "/global/voice/reference",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Transcribe audio
+   *
+   * Transcribe a short audio clip with WhisperX and return aligned timestamps.
+   */
+  public transcribe<ThrowOnError extends boolean = false>(
+    parameters?: {
+      voiceTranscribeInput?: VoiceTranscribeInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "voiceTranscribeInput", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      GlobalVoiceTranscribeResponses,
+      GlobalVoiceTranscribeErrors,
+      ThrowOnError
+    >({
+      url: "/global/voice/transcribe",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Synthesize speech
+   *
+   * Generate speech from text with OmniVoice and return a WAV data URL payload.
+   */
+  public synthesize<ThrowOnError extends boolean = false>(
+    parameters?: {
+      voiceSynthesizeInput?: VoiceSynthesizeInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "voiceSynthesizeInput", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      GlobalVoiceSynthesizeResponses,
+      GlobalVoiceSynthesizeErrors,
+      ThrowOnError
+    >({
+      url: "/global/voice/synthesize",
       ...options,
       ...params,
       headers: {
@@ -419,6 +581,11 @@ export class Global extends HeyApiClient {
   private _kanban?: Kanban
   get kanban(): Kanban {
     return (this._kanban ??= new Kanban({ client: this.client }))
+  }
+
+  private _voice?: Voice
+  get voice(): Voice {
+    return (this._voice ??= new Voice({ client: this.client }))
   }
 
   private _syncEvent?: SyncEvent

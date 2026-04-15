@@ -2,6 +2,7 @@
   "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
     "composite": true,
+    "rootDir": "..",
     "target": "ESNext",
     "module": "ESNext",
     "skipLibCheck": true,
@@ -18,9 +19,11 @@
     "outDir": "node_modules/.ts-dist",
     "isolatedModules": true,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@opencode-ai/voice": ["../voice/src/index.ts"],
+      "@opencode-ai/voice/*": ["../voice/src/*"]
     }
   },
-  "include": ["src", "package.json"],
+  "include": ["src", "package.json", "../voice/src"],
   "exclude": ["dist", "ts-dist"]
 }

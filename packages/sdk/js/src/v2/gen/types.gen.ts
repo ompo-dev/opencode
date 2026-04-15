@@ -128,6 +128,215 @@ export type KanbanOperation =
       cardID: string
     }
 
+export type VoicePhase = "disabled" | "idle" | "ensuring" | "starting" | "ready" | "busy" | "error"
+
+export type VoiceRuntimeConfig = {
+  enabled: boolean
+  python: string
+  device: "auto" | "cuda" | "cpu" | "mps"
+  dtype: "auto" | "float16" | "float32" | "int8"
+  install_on_demand: boolean
+  hf_token?: string
+}
+
+export type VoiceSttConfig = {
+  provider: "whisperx"
+  model: string
+  language: string
+  timestamps: "none" | "segment" | "word"
+  diarization: boolean
+  vad: boolean
+  compute_type: "float16" | "float32" | "int8"
+  batch_size: number
+  beam_size: number
+}
+
+export type VoiceMode = "auto" | "clone" | "design"
+
+export type VoiceDesign = {
+  gender?: string
+  age?: string
+  pitch?: string
+  style?: string
+  english_accent?: string
+  chinese_dialect?: string
+}
+
+export type VoiceTag =
+  | "[laughter]"
+  | "[sigh]"
+  | "[confirmation-en]"
+  | "[question-en]"
+  | "[question-ah]"
+  | "[question-oh]"
+  | "[question-ei]"
+  | "[question-yi]"
+  | "[surprise-ah]"
+  | "[surprise-oh]"
+  | "[surprise-wa]"
+  | "[surprise-yo]"
+  | "[dissatisfaction-hnn]"
+
+export type VoicePreset = {
+  id: string
+  name: string
+  mode: VoiceMode
+  ref_audio_path?: string
+  ref_text?: string
+  instruct?: string
+  design?: VoiceDesign
+  tags?: Array<VoiceTag>
+  language?: string
+  speed?: number
+}
+
+export type VoiceTtsConfig = {
+  provider: "omnivoice"
+  default_preset?: string
+  presets: Array<VoicePreset>
+  live: boolean
+  autoplay: boolean
+  chunking: "sentence"
+  stop_on_interrupt: boolean
+  strip_markdown: boolean
+  speed: number
+  duration?: number
+  num_step: number
+}
+
+export type VoiceConfigResolved = {
+  runtime: VoiceRuntimeConfig
+  stt: VoiceSttConfig
+  tts: VoiceTtsConfig
+}
+
+export type VoicePaths = {
+  root: string
+  references: string
+  stt_root: string
+  stt_venv: string
+  stt_python: string
+  stt_marker: string
+  tts_root: string
+  tts_venv: string
+  tts_python: string
+  tts_marker: string
+  ffmpeg_dir: string
+  ffmpeg?: string
+  ffprobe?: string
+  hf: string
+  tmp: string
+}
+
+export type VoiceStatus = {
+  ready: boolean
+  phase: VoicePhase
+  active_engine: "stt" | "tts" | null
+  device: string
+  diarization: boolean
+  worker: boolean
+  ffmpeg: boolean
+  error?: string
+  config: VoiceConfigResolved
+  paths: VoicePaths
+}
+
+export type BadRequestError = {
+  data: unknown
+  errors: Array<{
+    [key: string]: unknown
+  }>
+  success: false
+}
+
+export type VoiceEnsureInput = {
+  preload?: boolean
+}
+
+export type VoiceAssetOutput = {
+  path: string
+  name: string
+  audio: string
+}
+
+export type VoiceAssetInput = {
+  path: string
+}
+
+export type VoiceReferenceOutput = {
+  path: string
+  name: string
+  duration_ms: number
+  text?: string
+  language?: string
+  transcript_error?: string
+}
+
+export type VoiceReferenceInput = {
+  audio: string
+  name?: string
+  duration_ms?: number
+  transcribe?: boolean
+  language?: string
+}
+
+export type VoiceWord = {
+  word: string
+  start?: number | null
+  end?: number | null
+  score?: number | null
+  speaker?: string
+}
+
+export type VoiceSegment = {
+  id?: number
+  text: string
+  start?: number | null
+  end?: number | null
+  speaker?: string
+  words?: Array<VoiceWord>
+}
+
+export type VoiceTranscribeOutput = {
+  text: string
+  language?: string
+  duration_ms: number
+  segments: Array<VoiceSegment>
+  words: Array<VoiceWord>
+  speaker_labels?: Array<string>
+  raw?: unknown
+}
+
+export type VoiceTranscribeInput = {
+  audio: string
+  language?: string
+  diarization?: boolean
+}
+
+export type VoiceSynthesizeOutput = {
+  mime: string
+  sample_rate: number
+  duration_ms: number
+  text_used: string
+  audio: string
+  meta?: unknown
+}
+
+export type VoiceSynthesizeInput = {
+  text: string
+  preset?: string
+  mode?: VoiceMode
+  ref_audio_path?: string
+  ref_text?: string
+  instruct?: string
+  design?: VoiceDesign
+  tags?: Array<VoiceTag>
+  language?: string
+  speed?: number
+  duration?: number
+  num_step?: number
+}
+
 export type Project = {
   id: string
   worktree: string
@@ -643,6 +852,11 @@ export type EventWorktreeFailed = {
   }
 }
 
+export type EventVoiceUpdated = {
+  type: "voice.updated"
+  properties: VoiceStatus
+}
+
 export type OutputFormatText = {
   type: "text"
 }
@@ -1131,6 +1345,7 @@ export type Event =
   | EventPtyDeleted
   | EventWorktreeReady
   | EventWorktreeFailed
+  | EventVoiceUpdated
   | EventMessageUpdated
   | EventMessageRemoved
   | EventMessagePartUpdated
@@ -1467,6 +1682,50 @@ export type ProviderConfig = {
   }
 }
 
+export type VoiceRuntime = {
+  enabled?: boolean
+  python?: string
+  device?: "auto" | "cuda" | "cpu" | "mps"
+  dtype?: "auto" | "float16" | "float32" | "int8"
+  install_on_demand?: boolean
+  hf_token?: string
+}
+
+export type VoiceStt = {
+  provider?: "whisperx"
+  model?: string
+  language?: string
+  timestamps?: "none" | "segment" | "word"
+  diarization?: boolean
+  vad?: boolean
+  compute_type?: "float16" | "float32" | "int8"
+  batch_size?: number
+  beam_size?: number
+}
+
+export type VoiceTts = {
+  provider?: "omnivoice"
+  default_preset?: string
+  presets?: Array<VoicePreset>
+  live?: boolean
+  autoplay?: boolean
+  chunking?: "sentence"
+  stop_on_interrupt?: boolean
+  strip_markdown?: boolean
+  speed?: number
+  duration?: number
+  num_step?: number
+}
+
+/**
+ * Local voice runtime configuration for STT and TTS
+ */
+export type VoiceConfig = {
+  runtime?: VoiceRuntime
+  stt?: VoiceStt
+  tts?: VoiceTts
+}
+
 export type McpLocalConfig = {
   /**
    * Type of MCP server connection
@@ -1656,6 +1915,7 @@ export type Config = {
   provider?: {
     [key: string]: ProviderConfig
   }
+  voice?: VoiceConfig
   /**
    * MCP (Model Context Protocol) server configurations
    */
@@ -1750,14 +2010,6 @@ export type Config = {
      */
     mcp_timeout?: number
   }
-}
-
-export type BadRequestError = {
-  data: unknown
-  errors: Array<{
-    [key: string]: unknown
-  }>
-  success: false
 }
 
 export type OAuth = {
@@ -2308,6 +2560,147 @@ export type GlobalKanbanUpdateResponses = {
 }
 
 export type GlobalKanbanUpdateResponse = GlobalKanbanUpdateResponses[keyof GlobalKanbanUpdateResponses]
+
+export type GlobalVoiceStatusData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/voice/status"
+}
+
+export type GlobalVoiceStatusResponses = {
+  /**
+   * Voice status
+   */
+  200: VoiceStatus
+}
+
+export type GlobalVoiceStatusResponse = GlobalVoiceStatusResponses[keyof GlobalVoiceStatusResponses]
+
+export type GlobalVoiceEnsureData = {
+  body?: VoiceEnsureInput
+  path?: never
+  query?: never
+  url: "/global/voice/ensure"
+}
+
+export type GlobalVoiceEnsureErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalVoiceEnsureError = GlobalVoiceEnsureErrors[keyof GlobalVoiceEnsureErrors]
+
+export type GlobalVoiceEnsureResponses = {
+  /**
+   * Voice status
+   */
+  200: VoiceStatus
+}
+
+export type GlobalVoiceEnsureResponse = GlobalVoiceEnsureResponses[keyof GlobalVoiceEnsureResponses]
+
+export type GlobalVoiceAssetData = {
+  body?: VoiceAssetInput
+  path?: never
+  query?: never
+  url: "/global/voice/asset"
+}
+
+export type GlobalVoiceAssetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalVoiceAssetError = GlobalVoiceAssetErrors[keyof GlobalVoiceAssetErrors]
+
+export type GlobalVoiceAssetResponses = {
+  /**
+   * Voice asset payload
+   */
+  200: VoiceAssetOutput
+}
+
+export type GlobalVoiceAssetResponse = GlobalVoiceAssetResponses[keyof GlobalVoiceAssetResponses]
+
+export type GlobalVoiceReferenceData = {
+  body?: VoiceReferenceInput
+  path?: never
+  query?: never
+  url: "/global/voice/reference"
+}
+
+export type GlobalVoiceReferenceErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalVoiceReferenceError = GlobalVoiceReferenceErrors[keyof GlobalVoiceReferenceErrors]
+
+export type GlobalVoiceReferenceResponses = {
+  /**
+   * Stored reference audio
+   */
+  200: VoiceReferenceOutput
+}
+
+export type GlobalVoiceReferenceResponse = GlobalVoiceReferenceResponses[keyof GlobalVoiceReferenceResponses]
+
+export type GlobalVoiceTranscribeData = {
+  body?: VoiceTranscribeInput
+  path?: never
+  query?: never
+  url: "/global/voice/transcribe"
+}
+
+export type GlobalVoiceTranscribeErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalVoiceTranscribeError = GlobalVoiceTranscribeErrors[keyof GlobalVoiceTranscribeErrors]
+
+export type GlobalVoiceTranscribeResponses = {
+  /**
+   * Transcription result
+   */
+  200: VoiceTranscribeOutput
+}
+
+export type GlobalVoiceTranscribeResponse = GlobalVoiceTranscribeResponses[keyof GlobalVoiceTranscribeResponses]
+
+export type GlobalVoiceSynthesizeData = {
+  body?: VoiceSynthesizeInput
+  path?: never
+  query?: never
+  url: "/global/voice/synthesize"
+}
+
+export type GlobalVoiceSynthesizeErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalVoiceSynthesizeError = GlobalVoiceSynthesizeErrors[keyof GlobalVoiceSynthesizeErrors]
+
+export type GlobalVoiceSynthesizeResponses = {
+  /**
+   * Synthesis result
+   */
+  200: VoiceSynthesizeOutput
+}
+
+export type GlobalVoiceSynthesizeResponse = GlobalVoiceSynthesizeResponses[keyof GlobalVoiceSynthesizeResponses]
 
 export type GlobalEventData = {
   body?: never

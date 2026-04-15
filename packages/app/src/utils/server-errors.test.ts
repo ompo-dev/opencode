@@ -100,6 +100,12 @@ describe("formatServerError", () => {
     )
   })
 
+  test("returns nested sdk messages from plain objects", () => {
+    expect(formatServerError({ error: { data: { message: "Voice backend offline" } } }, language.t)).toBe(
+      "Voice backend offline",
+    )
+  })
+
   test("formats provider model errors using provider/model", () => {
     const error = {
       name: "ProviderModelNotFoundError",

@@ -10,7 +10,9 @@
     "customConditions": ["browser"],
     "paths": {
       "@/*": ["./src/*"],
-      "@tui/*": ["./src/cli/cmd/tui/*"]
+      "@tui/*": ["./src/cli/cmd/tui/*"],
+      "@opencode-ai/voice": ["../voice/src/index.ts"],
+      "@opencode-ai/voice/*": ["../voice/src/*"]
     },
     "plugins": [
       {

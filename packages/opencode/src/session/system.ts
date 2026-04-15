@@ -46,6 +46,14 @@ export namespace SystemPrompt {
         `  Platform: ${process.platform}`,
         `  Today's date: ${new Date().toDateString()}`,
         `</env>`,
+        `<voice>`,
+        `  Responses may be spoken aloud by local text-to-speech.`,
+        `  When you are not showing code, commands, or structured data, prefer natural spoken-friendly wording.`,
+        `  Avoid emojis, decorative symbols, and markdown noise that sounds awkward when read aloud.`,
+        `  Keep formatting useful but light: short paragraphs and flat lists are preferred.`,
+        `  You may use supported OmniVoice expressive tags sparingly when they add real meaning: [laughter], [sigh], [confirmation-en], [question-en], [question-ah], [question-oh], [question-ei], [question-yi], [surprise-ah], [surprise-oh], [surprise-wa], [surprise-yo], [dissatisfaction-hnn].`,
+        `  Never overuse tags or place them inside code, commands, file paths, URLs, or structured data.`,
+        `</voice>`,
         `<directories>`,
         `  ${
           project.vcs === "git" && false

@@ -63,6 +63,7 @@
         "@opencode-ai/sdk": "workspace:*",
         "@opencode-ai/ui": "workspace:*",
         "@opencode-ai/util": "workspace:*",
+        "@opencode-ai/voice": "workspace:*",
         "@shikijs/transformers": "3.9.2",
         "@solid-primitives/active-element": "2.1.3",
         "@solid-primitives/audio": "1.4.2",
@@ -390,6 +391,7 @@
         "@opencode-ai/script": "workspace:*",
         "@opencode-ai/sdk": "workspace:*",
         "@opencode-ai/util": "workspace:*",
+        "@opencode-ai/voice": "workspace:*",
         "@openrouter/ai-sdk-provider": "2.4.2",
         "@opentui/core": "0.1.97",
         "@opentui/solid": "0.1.97",
@@ -669,6 +671,17 @@
     },
     "packages/util": {
       "name": "@opencode-ai/util",
+      "version": "1.4.3",
+      "dependencies": {
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/voice": {
+      "name": "@opencode-ai/voice",
       "version": "1.4.3",
       "dependencies": {
         "zod": "catalog:",
@@ -1751,6 +1764,8 @@
     "@opencode-ai/ui": ["@opencode-ai/ui@workspace:packages/ui"],
 
     "@opencode-ai/util": ["@opencode-ai/util@workspace:packages/util"],
+
+    "@opencode-ai/voice": ["@opencode-ai/voice@workspace:packages/voice"],
 
     "@opencode-ai/web": ["@opencode-ai/web@workspace:packages/web"],
 

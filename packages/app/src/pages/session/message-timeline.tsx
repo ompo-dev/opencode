@@ -22,6 +22,7 @@ import { shouldMarkBoundaryGesture, normalizeWheelDelta } from "@/pages/session/
 import { SessionContextUsage } from "@/components/session-context-usage"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
+import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
 import { useSessionKey } from "@/pages/session/session-layout"
 import { useGlobalSDK } from "@/context/global-sdk"
@@ -33,6 +34,8 @@ import { messageAgentColor } from "@/utils/agent"
 import { sessionTitle } from "@/utils/session-title"
 import { parseCommentNote, readCommentMetadata } from "@/utils/comment-note"
 import { makeTimer } from "@solid-primitives/timer"
+import { voiceCfg } from "@opencode-ai/voice"
+import { createMessageVoice } from "./message-voice"
 
 type MessageComment = {
   path: string
@@ -234,6 +237,7 @@ export function MessageTimeline(props: {
 
   const navigate = useNavigate()
   const globalSDK = useGlobalSDK()
+  const globalSync = useGlobalSync()
   const sdk = useSDK()
   const sync = useSync()
   const settings = useSettings()
@@ -339,6 +343,48 @@ export function MessageTimeline(props: {
     turnStart: () => props.turnStart,
     messages: () => props.renderedUserMessages,
     config: stageCfg,
+  })
+  const voice = createMemo(() => voiceCfg(globalSync.data.config.voice))
+  const live = createMemo<{ id: string; parts: Part[] } | undefined>((prev) => {
+    const next = pending()
+    if (next) {
+      return {
+        id: next.id,
+        parts: sync.data.part[next.id] ?? [],
+      }
+    }
+
+    if (sessionStatus().type !== "idle") {
+      const last = sessionMessages().findLast((item): item is AssistantMessage => item.role === "assistant")
+      if (last) {
+        return {
+          id: last.id,
+          parts: sync.data.part[last.id] ?? [],
+        }
+      }
+    }
+
+    if (!prev) return
+    const last = sessionMessages().find(
+      (item): item is AssistantMessage => item.role === "assistant" && item.id === prev.id,
+    )
+    if (!last) return
+    return {
+      id: last.id,
+      parts: sync.data.part[last.id] ?? [],
+    }
+  })
+
+  createMessageVoice({
+    globalSDK,
+    session: sessionID,
+    turn: activeMessageID,
+    msg: createMemo(() => live()?.id),
+    parts: createMemo(() => live()?.parts ?? []),
+    status: sessionStatus,
+    cfg: voice,
+    mute: settings.voice.mute,
+    volume: settings.voice.volume,
   })
 
   const [title, setTitle] = createStore({

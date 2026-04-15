@@ -55,6 +55,7 @@ logger.log("app starting", {
   packaged: app.isPackaged,
 })
 
+setXdgEnv()
 setupApp()
 
 function setupApp() {
@@ -102,6 +103,13 @@ function setupApp() {
     setupAutoUpdater()
     await initialize()
   })
+}
+
+function setXdgEnv() {
+  const dir = app.getPath("userData")
+  process.env.XDG_DATA_HOME ??= dir
+  process.env.XDG_CACHE_HOME ??= dir
+  process.env.XDG_STATE_HOME ??= dir
 }
 
 function emitDeepLinks(urls: string[]) {

@@ -1,0 +1,41 @@
+INFO  2026-04-15T00:39:04 +429ms service=default version=0.0.0-dev-202604150034 args=["serve","--print-logs","--port","4102","--hostname","127.0.0.1"] opencode
+INFO  2026-04-15T00:39:04 +8ms service=config path=C:\Users\maico\.config\opencode\config.json loading
+INFO  2026-04-15T00:39:04 +3ms service=config path=C:\Users\maico\.config\opencode\opencode.json loading
+INFO  2026-04-15T00:39:04 +1ms service=config path=C:\Users\maico\.config\opencode\opencode.jsonc loading
+INFO  2026-04-15T00:39:14 +9840ms service=server method=POST path=/global/voice/ensure request
+INFO  2026-04-15T00:39:14 +1ms service=server status=started method=POST path=/global/voice/ensure request
+INFO  2026-04-15T00:39:21 +7003ms service=server status=completed duration=7003 method=POST path=/global/voice/ensure request
+INFO  2026-04-15T00:39:27 +5954ms service=server method=POST path=/global/voice/synthesize request
+INFO  2026-04-15T00:39:27 +1ms service=server status=started method=POST path=/global/voice/synthesize request
+INFO  2026-04-15T00:40:16 +48506ms service=server status=completed duration=48506 method=POST path=/global/voice/synthesize request
+INFO  2026-04-15T00:40:24 +8764ms service=server method=POST path=/global/voice/synthesize request
+INFO  2026-04-15T00:40:24 +1ms service=server status=started method=POST path=/global/voice/synthesize request
+INFO  2026-04-15T00:40:27 +2910ms service=server status=completed duration=2910 method=POST path=/global/voice/synthesize request
+INFO  2026-04-15T00:40:27 +59ms service=server method=POST path=/global/voice/transcribe request
+INFO  2026-04-15T00:40:27 +0ms service=server status=started method=POST path=/global/voice/transcribe request
+INFO  2026-04-15T00:41:06 +38180ms service=voice C:\Users\maico\.local\share\opencode\voice\stt\venv\Lib\site-packages\pyannote\audio\core\io.py:47: UserWarning: 
+INFO  2026-04-15T00:41:06 +1ms service=voice torchcodec is not installed correctly so built-in audio decoding will fail. Solutions are:
+INFO  2026-04-15T00:41:06 +0ms service=voice * use audio preloaded in-memory as a {'waveform': (channel, time) torch.Tensor, 'sample_rate': int} dictionary;
+INFO  2026-04-15T00:41:06 +0ms service=voice * fix torchcodec installation. Error message was:
+INFO  2026-04-15T00:41:06 +0ms service=voice Could not load libtorchcodec. Likely causes:
+INFO  2026-04-15T00:41:06 +0ms service=voice           1. FFmpeg is not properly installed in your environment. We support
+INFO  2026-04-15T00:41:06 +0ms service=voice              versions 4, 5, 6 and 7.
+INFO  2026-04-15T00:41:06 +1ms service=voice           2. The PyTorch version (2.8.0+cu128) is not compatible with
+INFO  2026-04-15T00:41:06 +0ms service=voice              this version of TorchCodec. Refer to the version compatibility
+INFO  2026-04-15T00:41:06 +0ms service=voice              table:
+INFO  2026-04-15T00:41:06 +0ms service=voice              https://github.com/pytorch/torchcodec?tab=readme-ov-file#installing-torchcodec.
+INFO  2026-04-15T00:41:06 +0ms service=voice           3. Another runtime dependency; see exceptions below.
+INFO  2026-04-15T00:41:06 +0ms service=voice         The following exceptions were raised as we tried to load libtorchcodec:
+INFO  2026-04-15T00:41:06 +4ms service=voice [start of libtorchcodec loading traceback]
+INFO  2026-04-15T00:41:06 +0ms service=voice FFmpeg version 7: Could not find module 'C:\Users\maico\.local\share\opencode\voice\stt\venv\Lib\site-packages\torchcodec\libtorchcodec_core7.dll' (or one of its dependencies). Try using the full path with constructor syntax.
+INFO  2026-04-15T00:41:06 +1ms service=voice FFmpeg version 6: Could not find module 'C:\Users\maico\.local\share\opencode\voice\stt\venv\Lib\site-packages\torchcodec\libtorchcodec_core6.dll' (or one of its dependencies). Try using the full path with constructor syntax.
+INFO  2026-04-15T00:41:06 +0ms service=voice FFmpeg version 5: Could not find module 'C:\Users\maico\.local\share\opencode\voice\stt\venv\Lib\site-packages\torchcodec\libtorchcodec_core5.dll' (or one of its dependencies). Try using the full path with constructor syntax.
+INFO  2026-04-15T00:41:06 +0ms service=voice FFmpeg version 4: Could not find module 'C:\Users\maico\.local\share\opencode\voice\stt\venv\Lib\site-packages\torchcodec\libtorchcodec_core4.dll' (or one of its dependencies). Try using the full path with constructor syntax.
+INFO  2026-04-15T00:41:06 +2ms service=voice [end of libtorchcodec loading traceback].
+INFO  2026-04-15T00:41:06 +0ms service=voice   warnings.warn(
+INFO  2026-04-15T00:41:09 +3903ms service=voice 2026-04-14 21:41:09 - whisperx.asr - INFO - No language specified, language will be detected for each audio file (increases inference time)
+INFO  2026-04-15T00:41:09 +1ms service=voice 2026-04-14 21:41:09 - whisperx.vads.silero - INFO - Performing voice activity detection using Silero...
+INFO  2026-04-15T00:41:10 +147ms service=voice Using cache found in C:\Users\maico\.cache\opencode\torch\hub\snakers4_silero-vad_master
+INFO  2026-04-15T00:41:11 +993ms service=voice 2026-04-14 21:41:11 - whisperx.asr - WARNING - Audio is shorter than 30s, language detection may be inaccurate
+INFO  2026-04-15T00:41:11 +510ms service=voice 2026-04-14 21:41:11 - whisperx.asr - INFO - Detected language: en (0.99) in first 30s of audio
+INFO  2026-04-15T00:41:14 +2851ms service=server status=completed duration=46594 method=POST path=/global/voice/transcribe request

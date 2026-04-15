@@ -25,9 +25,21 @@ function tr(translator: Translator | undefined, key: string, text: string, vars?
   return out
 }
 
-export function formatServerError(error: unknown, translate?: Translator, fallback?: string) {
+export function formatServerError(error: unknown, translate?: Translator, fallback?: string): string {
   if (isConfigInvalidErrorLike(error)) return parseReadableConfigInvalidError(error, translate)
   if (isProviderModelNotFoundErrorLike(error)) return parseReadableProviderModelNotFoundError(error, translate)
+  if (error && typeof error === "object" && "data" in error) {
+    const data = (error as { data?: { message?: unknown } }).data
+    if (typeof data?.message === "string" && data.message) return data.message
+  }
+  if (error && typeof error === "object" && "error" in error) {
+    const nested = formatServerError((error as { error?: unknown }).error, translate, "")
+    if (nested) return nested
+  }
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === "string" && message) return message
+  }
   if (error instanceof Error && error.message) return error.message
   if (typeof error === "string" && error) return error
   if (fallback) return fallback

@@ -60,6 +60,7 @@ export async function spawnLocalServer(hostname: string, port: number, password:
 function prepareServerEnv(password: string) {
   const shell = process.platform === "win32" ? null : getUserShell()
   const shellEnv = shell ? (loadShellEnv(shell) ?? {}) : {}
+  const dir = app.getPath("userData")
   const env = {
     ...process.env,
     ...shellEnv,
@@ -68,7 +69,9 @@ function prepareServerEnv(password: string) {
     OPENCODE_CLIENT: "desktop",
     OPENCODE_SERVER_USERNAME: "opencode",
     OPENCODE_SERVER_PASSWORD: password,
-    XDG_STATE_HOME: app.getPath("userData"),
+    XDG_DATA_HOME: dir,
+    XDG_CACHE_HOME: dir,
+    XDG_STATE_HOME: dir,
   }
   Object.assign(process.env, env)
 }

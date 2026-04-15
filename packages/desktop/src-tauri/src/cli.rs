@@ -368,10 +368,14 @@ pub fn spawn_command(
     args: &str,
     extra_env: &[(&str, String)],
 ) -> Result<(impl Stream<Item = CommandEvent> + 'static, CommandChild), std::io::Error> {
-    let state_dir = app
+    let data_dir = app
         .path()
         .resolve("", BaseDirectory::AppLocalData)
         .expect("Failed to resolve app local data dir");
+    let cache_dir = app
+        .path()
+        .resolve("", BaseDirectory::AppCache)
+        .expect("Failed to resolve app cache dir");
 
     let mut envs = vec![
         (
@@ -384,8 +388,16 @@ pub fn spawn_command(
         ),
         ("OPENCODE_CLIENT".to_string(), "desktop".to_string()),
         (
+            "XDG_DATA_HOME".to_string(),
+            data_dir.to_string_lossy().to_string(),
+        ),
+        (
+            "XDG_CACHE_HOME".to_string(),
+            cache_dir.to_string_lossy().to_string(),
+        ),
+        (
             "XDG_STATE_HOME".to_string(),
-            state_dir.to_string_lossy().to_string(),
+            data_dir.to_string_lossy().to_string(),
         ),
     ];
     envs.extend(
@@ -413,6 +425,8 @@ pub fn spawn_command(
                 "OPENCODE_EXPERIMENTAL_ICON_DISCOVERY=true".to_string(),
                 "OPENCODE_EXPERIMENTAL_FILEWATCHER=true".to_string(),
                 "OPENCODE_CLIENT=desktop".to_string(),
+                "XDG_DATA_HOME=\"$HOME/.local/share\"".to_string(),
+                "XDG_CACHE_HOME=\"$HOME/.cache\"".to_string(),
                 "XDG_STATE_HOME=\"$HOME/.local/state\"".to_string(),
             ];
             env_prefix.extend(
@@ -420,6 +434,8 @@ pub fn spawn_command(
                     .filter(|(key, _)| key != "OPENCODE_EXPERIMENTAL_ICON_DISCOVERY")
                     .filter(|(key, _)| key != "OPENCODE_EXPERIMENTAL_FILEWATCHER")
                     .filter(|(key, _)| key != "OPENCODE_CLIENT")
+                    .filter(|(key, _)| key != "XDG_DATA_HOME")
+                    .filter(|(key, _)| key != "XDG_CACHE_HOME")
                     .filter(|(key, _)| key != "XDG_STATE_HOME")
                     .map(|(key, value)| format!("{}={}", key, shell_escape(value))),
             );
