@@ -1,14 +1,11 @@
 import { showToast } from "@opencode-ai/ui/toast"
 import type { Part, SessionStatus, TextPart } from "@opencode-ai/sdk/v2"
-import { SentenceChunker, createAudioQueue, type AudioQueueState } from "@opencode-ai/voice"
+import { LineChunker, createAudioQueue, type AudioQueueState } from "@opencode-ai/voice"
 import { createEffect, onCleanup, type Accessor } from "solid-js"
 import type { useGlobalSDK } from "@/context/global-sdk"
 import { voiceDebug } from "@/context/voice-debug"
 import { formatServerError } from "@/utils/server-errors"
 import { type VoiceConfigResolved, voiceInput } from "@opencode-ai/voice"
-
-type Delay = (fn: () => void, ms: number) => ReturnType<typeof setTimeout>
-type Clear = (timer: ReturnType<typeof setTimeout>) => void
 
 const speakable = (part: Part): part is TextPart => part.type === "text" && !part.synthetic && !part.ignored
 type AudioQueue = Pick<ReturnType<typeof createAudioQueue>, "enqueue" | "clear" | "update">
@@ -28,91 +25,110 @@ export function createVoiceCtrl(input: {
   note?: (error: unknown) => void
   event?: (input: { type: "start" | "queue" | "drop" | "error"; msg: string; text: string; error?: unknown }) => void
   queue: AudioQueue
-  later?: Delay
-  clear?: Clear
-  now?: () => number
 }) {
   let msg = ""
-  let text = ""
   let rev = 0
-  let timer: ReturnType<typeof setTimeout> | undefined
-  let run = Promise.resolve()
+  let seq = 0
+  let ack = 0
+  let run = 0
+  const todo: string[] = []
+  const out = new Map<number, { text: string; audio?: string }>()
   let chunk = make()
 
   function make() {
-    return new SentenceChunker({
-      limit: 140,
-      idle: 500,
+    return new LineChunker({
       stripMarkdown: input.strip(),
     })
   }
 
-  const clear = () => {
-    if (timer === undefined) return
-    ;(input.clear ?? clearTimeout)(timer)
-    timer = undefined
-  }
-
   const stop = () => {
     rev += 1
-    clear()
     msg = ""
-    text = ""
+    seq = 0
+    ack = 0
+    run = 0
+    todo.length = 0
+    out.clear()
     chunk = make()
     input.queue.clear()
   }
 
-  const push = (list: string[], now: number) => {
-    list.forEach((item) => {
-      run = run.then(async () => {
-        if (now !== rev || !input.enabled()) return
-        const id = msg
+  const drain = (now: number) => {
+    while (out.has(ack)) {
+      const item = out.get(ack)
+      out.delete(ack)
+      ack += 1
+      if (now !== rev || !input.enabled() || !item) continue
+      if (!item.audio) {
         input.event?.({
-          type: "start",
-          msg: id,
-          text: item,
+          type: "drop",
+          msg,
+          text: item.text,
         })
-        const audio = await input
-          .synth(item)
-          .catch((error) => {
-            input.event?.({
-              type: "error",
-              msg: id,
-              text: item,
-              error,
-            })
-            input.note?.(error)
-            return
-          })
-        if (now !== rev || !audio) {
-          input.event?.({
-            type: "drop",
-            msg: id,
-            text: item,
-          })
-          return
-        }
-        input.event?.({
-          type: "queue",
-          msg: id,
-          text: item,
-        })
-        input.queue.enqueue(audio)
+        continue
+      }
+      input.event?.({
+        type: "queue",
+        msg,
+        text: item.text,
       })
-    })
+      input.queue.enqueue(item.audio)
+    }
   }
 
-  const idle = () => {
-    clear()
-    if (!msg || !text.trim()) return
-    const now = rev
-    timer = (input.later ?? setTimeout)(() => {
-      timer = undefined
-      if (now !== rev || !msg || !input.enabled()) return
-      const list = chunk.sync(text, false, input.now?.() ?? Date.now())
-      push(list, now)
-      if (list.length > 0) idle()
-    }, 520)
+  const pump = (now: number) => {
+    while (run < 2 && todo.length > 0) {
+      const item = todo.shift()
+      if (!item) return
+      const at = seq
+      seq += 1
+      run += 1
+      const id = msg
+      input.event?.({
+        type: "start",
+        msg: id,
+        text: item,
+      })
+      void input
+        .synth(item)
+        .then((audio) => {
+          run -= 1
+          if (now !== rev || !input.enabled()) {
+            input.event?.({
+              type: "drop",
+              msg: id,
+              text: item,
+            })
+            pump(now)
+            return
+          }
+          out.set(at, { text: item, audio })
+          drain(now)
+          pump(now)
+        })
+        .catch((error) => {
+          run -= 1
+          input.event?.({
+            type: "error",
+            msg: id,
+            text: item,
+            error,
+          })
+          input.note?.(error)
+          if (now !== rev || !input.enabled()) {
+            pump(now)
+            return
+          }
+          out.set(at, { text: item })
+          drain(now)
+          pump(now)
+        })
+    }
+  }
+
+  const push = (items: string[], now: number) => {
+    todo.push(...items)
+    pump(now)
   }
 
   return {
@@ -124,21 +140,19 @@ export function createVoiceCtrl(input: {
       if (msg && msg !== next.msg) stop()
       if (msg !== next.msg) {
         msg = next.msg
+        seq = 0
+        ack = 0
+        run = 0
+        todo.length = 0
+        out.clear()
         chunk = make()
       }
-      text = next.text
       const now = rev
-      push(next.done ? chunk.flush(input.now?.() ?? Date.now()) : chunk.sync(text, false, input.now?.() ?? Date.now()), now)
-      if (next.done) {
-        clear()
-        return
-      }
-      idle()
+      push(chunk.sync(next.text, !!next.done), now)
     },
     flush() {
       if (!input.enabled() || !msg) return
-      clear()
-      push(chunk.flush(input.now?.() ?? Date.now()), rev)
+      push(chunk.flush(), rev)
     },
     stop,
     update() {
@@ -348,7 +362,6 @@ export function createMessageVoice(input: {
       ctrl.sync({
         msg,
         text,
-        done: input.status().type === "idle",
       })
       return
     }

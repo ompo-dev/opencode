@@ -22,7 +22,7 @@ describe("joinVoiceText", () => {
 })
 
 describe("createVoiceCtrl", () => {
-  test("flushes sentence chunks in order", async () => {
+  test("flushes line chunks in order", async () => {
     const list: string[] = []
     const ctrl = createVoiceCtrl({
       enabled: () => true,
@@ -35,11 +35,11 @@ describe("createVoiceCtrl", () => {
       },
     })
 
-    ctrl.sync({ msg: "m1", text: "One. Two" })
+    ctrl.sync({ msg: "m1", text: "One\nTwo" })
     ctrl.flush()
     await tick()
 
-    expect(list).toEqual(["audio:One.", "audio:Two"])
+    expect(list).toEqual(["audio:One", "audio:Two"])
   })
 
   test("drops stale audio when the message changes", async () => {
@@ -59,22 +59,21 @@ describe("createVoiceCtrl", () => {
       },
     })
 
-    ctrl.sync({ msg: "m1", text: "First." })
-    ctrl.sync({ msg: "m2", text: "Second." })
+    ctrl.sync({ msg: "m1", text: "First\nnext" })
+    ctrl.sync({ msg: "m2", text: "Second\nnext" })
 
     await tick(20)
-    expect(hold).toHaveLength(1)
-    expect(hold[0]?.text).toBe("Second.")
+    expect(hold).toHaveLength(2)
+    expect(hold.map((item) => item.text)).toEqual(["First", "Second"])
     hold[0]?.resolve(`audio:${hold[0].text}`)
+    hold[1]?.resolve(`audio:${hold[1].text}`)
     await tick()
 
-    expect(list).toEqual(["audio:Second."])
+    expect(list).toEqual(["audio:Second"])
   })
 
-  test("emits a soft chunk after the idle window", async () => {
+  test("waits for a full line before queueing the next chunk", async () => {
     const list: string[] = []
-    let job: (() => void) | undefined
-    let now = 1_000
     const ctrl = createVoiceCtrl({
       enabled: () => true,
       strip: () => true,
@@ -84,23 +83,53 @@ describe("createVoiceCtrl", () => {
         clear: () => undefined,
         update: () => undefined,
       },
-      later: (fn) => {
-        job = fn
-        return 1 as unknown as ReturnType<typeof setTimeout>
-      },
-      clear: () => {
-        job = undefined
-      },
-      now: () => now,
     })
 
-    ctrl.sync({ msg: "m1", text: "alpha ".repeat(40).trimEnd() })
+    ctrl.sync({ msg: "m1", text: "alpha" })
+    await tick()
     expect(list).toEqual([])
-    now = 2_000
-    job?.()
+    ctrl.sync({ msg: "m1", text: "alpha\n" })
     await tick()
 
-    expect(list).toHaveLength(1)
-    expect(list[0]?.startsWith("audio:alpha")).toBe(true)
+    expect(list).toEqual(["audio:alpha"])
+  })
+
+  test("starts multiple line synths across streaming updates and preserves queue order", async () => {
+    const list: string[] = []
+    const hold: Array<{ text: string; resolve: (value?: string) => void }> = []
+    const ctrl = createVoiceCtrl({
+      enabled: () => true,
+      strip: () => true,
+      synth: (text) =>
+        new Promise((resolve) => {
+          hold.push({ text, resolve })
+        }),
+      queue: {
+        enqueue: (src) => list.push(src),
+        clear: () => undefined,
+        update: () => undefined,
+      },
+    })
+
+    ctrl.sync({ msg: "m1", text: "One\n" })
+    ctrl.sync({ msg: "m1", text: "One\nTwo\n" })
+    ctrl.sync({ msg: "m1", text: "One\nTwo\nThree" })
+    ctrl.flush()
+    await tick(20)
+
+    expect(hold.map((item) => item.text)).toEqual(["One", "Two"])
+
+    hold[0]?.resolve("audio:One")
+    await tick(10)
+    expect(list).toEqual(["audio:One"])
+    expect(hold.map((item) => item.text)).toEqual(["One", "Two", "Three"])
+
+    hold[1]?.resolve("audio:Two")
+    await tick(10)
+    expect(list).toEqual(["audio:One", "audio:Two"])
+
+    hold[2]?.resolve("audio:Three")
+    await tick(10)
+    expect(list).toEqual(["audio:One", "audio:Two", "audio:Three"])
   })
 })

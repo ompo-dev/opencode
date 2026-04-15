@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { SentenceChunker, normalizeSpeechText } from "./chunk"
+import { LineChunker, SentenceChunker, normalizeSpeechLines, normalizeSpeechText } from "./chunk"
 
 describe("normalizeSpeechText", () => {
   test("preserves supported tags while stripping markdown", () => {
@@ -10,6 +10,13 @@ describe("normalizeSpeechText", () => {
   test("turns markdown structure into speakable sentences", () => {
     const text = normalizeSpeechText("# Summary\n- first item\n- second item\n> quoted line")
     expect(text).toBe("Summary.\nfirst item.\nsecond item.\nquoted line.")
+  })
+})
+
+describe("normalizeSpeechLines", () => {
+  test("preserves a trailing newline for line streaming", () => {
+    const text = normalizeSpeechLines("alpha\n")
+    expect(text).toBe("alpha\n")
   })
 })
 
@@ -37,5 +44,20 @@ describe("SentenceChunker", () => {
     expect(chunk.sync("alpha beta gamma", false, 0)).toEqual([])
     expect(chunk.sync("alpha beta gamma", false, 200)).toEqual(["alpha beta"])
     expect(chunk.flush(300)).toEqual(["gamma"])
+  })
+})
+
+describe("LineChunker", () => {
+  test("emits complete lines before the message ends", () => {
+    const chunk = new LineChunker()
+    expect(chunk.sync("alpha\n")).toEqual(["alpha"])
+    expect(chunk.sync("alpha\nbeta")).toEqual([])
+    expect(chunk.flush()).toEqual(["beta"])
+  })
+
+  test("keeps markdown line semantics for speech", () => {
+    const chunk = new LineChunker({ stripMarkdown: true })
+    expect(chunk.sync("# Title\n- item")).toEqual(["Title."])
+    expect(chunk.flush()).toEqual(["item."])
   })
 })

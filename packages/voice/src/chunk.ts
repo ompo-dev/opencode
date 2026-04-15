@@ -32,6 +32,10 @@ function clean(input: string) {
   return input.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/[ \t]{2,}/g, " ").trim()
 }
 
+function tidy(input: string) {
+  return input.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/[ \t]{2,}/g, " ")
+}
+
 function mark(input: string) {
   const text = input.trim()
   if (!text) return ""
@@ -130,6 +134,26 @@ export function normalizeSpeechText(input: string, opts?: { stripMarkdown?: bool
   )
 }
 
+export function normalizeSpeechLines(input: string, opts?: { stripMarkdown?: boolean }) {
+  const { map, text } = protect(input.replace(/\r\n?/g, "\n"))
+  if (opts?.stripMarkdown === false) return tidy(restore(text, map))
+  return tidy(
+    restore(
+      speak(
+        text
+          .replace(guard, " ")
+          .replace(image, "$1")
+          .replace(link, "$1")
+          .replace(url, " ")
+          .replace(code, "$1")
+          .replace(html, " ")
+          .replace(emphasis, ""),
+      ),
+      map,
+    ),
+  )
+}
+
 export class SentenceChunker {
   private raw = ""
   private sent = ""
@@ -183,5 +207,47 @@ export class SentenceChunker {
     this.raw = ""
     this.sent = ""
     this.seen = 0
+  }
+}
+
+export class LineChunker {
+  private raw = ""
+  private sent = ""
+
+  constructor(
+    private readonly opts: {
+      stripMarkdown?: boolean
+    } = {},
+  ) {}
+
+  sync(input: string, done = false) {
+    const text = normalizeSpeechLines(input, { stripMarkdown: this.opts.stripMarkdown })
+    this.raw = text
+    this.sent = text.startsWith(this.sent) ? this.sent : text.slice(0, Math.min(text.length, prefix(text, this.sent)))
+    const out: string[] = []
+
+    while (true) {
+      const tail = text.slice(this.sent.length)
+      const idx = tail.indexOf("\n")
+      if (idx < 0) break
+      const next = clean(tail.slice(0, idx))
+      if (next) out.push(next)
+      this.sent += tail.slice(0, idx + 1)
+    }
+
+    if (!done) return out
+    const next = clean(text.slice(this.sent.length))
+    if (next) out.push(next)
+    this.sent = text
+    return out
+  }
+
+  flush() {
+    return this.sync(this.raw, true)
+  }
+
+  reset() {
+    this.raw = ""
+    this.sent = ""
   }
 }
