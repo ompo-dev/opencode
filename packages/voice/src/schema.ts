@@ -214,6 +214,14 @@ export const EngineStatus = z
   .strict()
   .meta({ ref: "VoiceEngineStatus" })
 
+export const DependencyStatus = z
+  .object({
+    python: z.boolean(),
+    ffmpeg: z.boolean(),
+  })
+  .strict()
+  .meta({ ref: "VoiceDependencyStatus" })
+
 export const Status = z
   .object({
     ready: z.boolean(),
@@ -223,6 +231,7 @@ export const Status = z
     diarization: z.boolean(),
     worker: z.boolean(),
     ffmpeg: z.boolean(),
+    deps: DependencyStatus,
     error: z.string().optional(),
     activity: Activity,
     engines: z
@@ -240,9 +249,17 @@ export const Status = z
 export const EnsureInput = z
   .object({
     preload: z.boolean().optional(),
+    target: z.enum(["all", "stt", "tts"]).optional(),
   })
   .strict()
   .meta({ ref: "VoiceEnsureInput" })
+
+export const CancelInput = z
+  .object({
+    target: z.enum(["all", "stt", "tts"]).optional(),
+  })
+  .strict()
+  .meta({ ref: "VoiceCancelInput" })
 
 export const ReferenceInput = z
   .object({
@@ -361,6 +378,7 @@ export const SynthesizeOutput = z
 export type VoiceConfig = z.infer<typeof VoiceSchema>
 export type VoiceConfigResolved = z.infer<typeof ConfigCfg>
 export type VoiceStatus = z.infer<typeof Status>
+export type VoiceCancelInput = z.infer<typeof CancelInput>
 export type VoicePreset = z.infer<typeof Preset>
 export type VoiceDesign = z.infer<typeof VoiceDesign>
 export type VoiceReferenceInput = z.infer<typeof ReferenceInput>

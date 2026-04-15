@@ -222,6 +222,7 @@ export const SettingsVoice: Component = () => {
   const [store, setStore] = createStore({
     saving: false,
     ensuring: false,
+    canceling: false,
     preset: "",
     custom: false,
   })
@@ -271,6 +272,16 @@ export const SettingsVoice: Component = () => {
       }
     }),
   )
+  const modelOptions = createMemo(() =>
+    modelList().map((item) => ({
+      ...item,
+      state: item.loading
+        ? tx(`baixando ${item.progress ?? 0}%`, `downloading ${item.progress ?? 0}%`)
+        : item.downloaded
+          ? tx("baixado", "downloaded")
+          : tx("não baixado", "not downloaded"),
+    })),
+  )
   const customModel = createMemo(() => !sttmodels.some((item) => item.value === draft.stt.model) || store.custom)
   const runtimeReady = createMemo(() => status()?.engines.stt.standby && status()?.engines.tts.standby)
   const activity = createMemo(() => status()?.activity)
@@ -302,6 +313,32 @@ export const SettingsVoice: Component = () => {
       ready: tx("Pronto", "Ready"),
     }
     return map[item.stage] ?? item.stage
+  })
+  const busy = createMemo(() => ["ensuring", "starting"].includes(status()?.phase ?? "idle"))
+  const running = (target: "all" | "stt" | "tts") => {
+    const item = activity()?.target
+    if (!item) return false
+    if (item === "all") return true
+    return item === target
+  }
+  const sttActive = createMemo(() => modelMap().get(draft.stt.model))
+  const sttReady = createMemo(() => !!sttActive()?.downloaded)
+  const whisperText = createMemo(() => {
+    if (running("stt")) return tx("Pausar", "Pause")
+    if (!status()?.engines.stt.installed) return tx("Baixar WhisperX", "Download WhisperX")
+    if (!sttReady()) return tx("Baixar modelo atual", "Download current model")
+    if (!status()?.engines.stt.warmed) return tx("Ativar WhisperX", "Warm WhisperX")
+    return tx("Revalidar WhisperX", "Recheck WhisperX")
+  })
+  const omnivoiceText = createMemo(() => {
+    if (running("tts")) return tx("Pausar", "Pause")
+    if (!status()?.engines.tts.installed) return tx("Baixar OmniVoice", "Download OmniVoice")
+    if (!status()?.engines.tts.warmed) return tx("Ativar OmniVoice", "Warm OmniVoice")
+    return tx("Revalidar OmniVoice", "Recheck OmniVoice")
+  })
+  const runtimeText = createMemo(() => {
+    if (running("all")) return tx("Pausar tudo", "Pause all")
+    return tx("Preparar tudo", "Prepare all")
   })
 
   const syncDraft = () => {
@@ -336,21 +373,36 @@ export const SettingsVoice: Component = () => {
     }
   }
 
-  const ensure = async (preload = false) => {
-    if (store.ensuring) return
+  const ensure = async (target: "all" | "stt" | "tts" = "all", preload = true) => {
+    if (store.ensuring || store.canceling) return
     setStore("ensuring", true)
     try {
-      if (preload && dirty()) {
+      if (dirty()) {
         await globalSync.updateConfig({ voice: draft })
       }
       const res = await globalSDK.client.global.voice.ensure({
-        voiceEnsureInput: { preload },
+        voiceEnsureInput: { preload, target },
       })
       if (res.data) setStatus(res.data)
     } catch (error) {
       notify(error)
     } finally {
       setStore("ensuring", false)
+    }
+  }
+
+  const cancel = async (target: "all" | "stt" | "tts" = "all") => {
+    if (store.canceling) return
+    setStore("canceling", true)
+    try {
+      const res = await globalSDK.client.global.voice.cancel({
+        voiceCancelInput: { target },
+      })
+      if (res.data) setStatus(res.data)
+    } catch (error) {
+      notify(error)
+    } finally {
+      setStore("canceling", false)
     }
   }
 
@@ -656,11 +708,16 @@ export const SettingsVoice: Component = () => {
               </Show>
             </div>
             <div class="flex items-center gap-2">
-              <Button size="small" variant="secondary" onClick={() => void ensure()} disabled={store.ensuring}>
-                {store.ensuring ? tx("Preparando runtime", "Preparing runtime") : tx("Garantir runtime", "Ensure runtime")}
+              <Button size="small" variant="secondary" onClick={() => void load()} disabled={busy()}>
+                {tx("Atualizar status", "Refresh status")}
               </Button>
-              <Button size="small" variant="secondary" onClick={() => void ensure(true)} disabled={store.ensuring}>
-                {store.ensuring ? tx("Pré-carregando", "Preloading") : tx("Pré-carregar modelos", "Preload models")}
+              <Button
+                size="small"
+                variant="secondary"
+                onClick={() => void (busy() ? cancel(activity()?.target ?? "all") : ensure("all", true))}
+                disabled={store.canceling}
+              >
+                {busy() ? tx("Pausar instalacao", "Pause install") : tx("Preparar tudo", "Prepare all")}
               </Button>
               <Button size="small" variant="primary" onClick={save} disabled={!dirty() || store.saving}>
                 {store.saving ? tx("Salvando", "Saving") : tx("Salvar voz", "Save voice")}
@@ -671,6 +728,110 @@ export const SettingsVoice: Component = () => {
       </div>
 
       <div class="flex flex-col gap-8 max-w-[860px]">
+        <Section title={tx("Central de instalacao", "Install center")}>
+          <div class="grid gap-3 md:grid-cols-3">
+            <InstallCard
+              title={tx("Runtime compartilhado", "Shared runtime")}
+              description={tx(
+                "Prepara Python, FFmpeg e o runtime local para um usuario leigo ligar voz sem setup manual.",
+                "Prepare Python, FFmpeg, and the local runtime so a first-time user can enable voice without manual setup.",
+              )}
+              state={activityText() ?? tx("Pronto para preparar todos os componentes.", "Ready to prepare every component.")}
+              progress={running("all") ? activity()?.progress : undefined}
+              action={runtimeText()}
+              busy={running("all")}
+              onAction={() => void (running("all") ? cancel("all") : ensure("all", true))}
+              tone={status()?.deps.python && status()?.deps.ffmpeg ? "good" : "warn"}
+              tags={[
+                {
+                  label: `Python ${status()?.deps.python ? tx("ok", "ok") : tx("ausente", "missing")}`,
+                  tone: status()?.deps.python ? "good" : "warn",
+                },
+                {
+                  label: `FFmpeg ${status()?.deps.ffmpeg ? tx("ok", "ok") : tx("ausente", "missing")}`,
+                  tone: status()?.deps.ffmpeg ? "good" : "warn",
+                },
+                {
+                  label: `${tx("Dispositivo", "Device")}: ${draft.runtime.device}`,
+                  tone: "muted",
+                },
+              ]}
+            />
+            <InstallCard
+              title="WhisperX"
+              description={tx(
+                "Transcreve microfone e audio local. O modelo padrao para novos usuarios e small.",
+                "Transcribe microphone and local audio. The default model for new users is small.",
+              )}
+              state={
+                running("stt")
+                  ? activityText() ?? tx("Instalando WhisperX...", "Installing WhisperX...")
+                  : status()?.engines.stt.warmed
+                    ? tx("WhisperX em espera e pronto para transcrever.", "WhisperX is warm and ready to transcribe.")
+                    : status()?.engines.stt.installed
+                      ? tx("WhisperX instalado. Falta aquecer o modelo selecionado.", "WhisperX is installed. Warm the selected model.")
+                      : tx("WhisperX ainda nao foi instalado neste app.", "WhisperX is not installed in this app yet.")
+              }
+              progress={running("stt") ? status()?.engines.stt.progress ?? activity()?.progress : undefined}
+              action={whisperText()}
+              busy={running("stt")}
+              onAction={() => void (running("stt") ? cancel("stt") : ensure("stt", true))}
+              tone={status()?.engines.stt.warmed ? "good" : status()?.engines.stt.installed ? "warn" : "muted"}
+              tags={[
+                {
+                  label: `${tx("Modelo", "Model")}: ${draft.stt.model}`,
+                  tone: sttReady() ? "good" : "muted",
+                },
+                {
+                  label: sttReady() ? tx("Modelo baixado", "Model downloaded") : tx("Modelo pendente", "Model pending"),
+                  tone: sttReady() ? "good" : "warn",
+                },
+                {
+                  label: status()?.engines.stt.standby ? tx("Em espera", "Standby") : tx("Frio", "Cold"),
+                  tone: status()?.engines.stt.standby ? "good" : "muted",
+                },
+              ]}
+              note={sttActive()?.note}
+            />
+            <InstallCard
+              title="OmniVoice"
+              description={tx(
+                "Sintese local da voz do assistente com clone e design de voz. Usa o preset padrao salvo abaixo.",
+                "Local assistant speech synthesis with voice clone and voice design. Uses the default preset saved below.",
+              )}
+              state={
+                running("tts")
+                  ? activityText() ?? tx("Instalando OmniVoice...", "Installing OmniVoice...")
+                  : status()?.engines.tts.warmed
+                    ? tx("OmniVoice em espera e pronto para falar.", "OmniVoice is warm and ready to speak.")
+                    : status()?.engines.tts.installed
+                      ? tx("OmniVoice instalado. Falta aquecer o motor.", "OmniVoice is installed. Warm the engine.")
+                      : tx("OmniVoice ainda nao foi instalado neste app.", "OmniVoice is not installed in this app yet.")
+              }
+              progress={running("tts") ? status()?.engines.tts.progress ?? activity()?.progress : undefined}
+              action={omnivoiceText()}
+              busy={running("tts")}
+              onAction={() => void (running("tts") ? cancel("tts") : ensure("tts", true))}
+              tone={status()?.engines.tts.warmed ? "good" : status()?.engines.tts.installed ? "warn" : "muted"}
+              tags={[
+                {
+                  label: status()?.engines.tts.installed ? tx("Runtime instalado", "Runtime installed") : tx("Runtime pendente", "Runtime pending"),
+                  tone: status()?.engines.tts.installed ? "good" : "warn",
+                },
+                {
+                  label: status()?.engines.tts.standby ? tx("Em espera", "Standby") : tx("Frio", "Cold"),
+                  tone: status()?.engines.tts.standby ? "good" : "muted",
+                },
+                {
+                  label: `${tx("Preset padrao", "Default preset")}: ${draft.tts.default_preset ?? tx("nenhum", "none")}`,
+                  tone: "muted",
+                },
+              ]}
+              note={status()?.engines.tts.note}
+            />
+          </div>
+        </Section>
+
         <Section title={tx("Runtime", "Runtime")}>
           <SettingsList>
             <Row title={tx("Ativado", "Enabled")} description={tx("Expõe os recursos de voz local no aplicativo.", "Expose local voice features in the app.")}>
@@ -689,7 +850,7 @@ export const SettingsVoice: Component = () => {
               />
             </Row>
             <Row
-              title="Python"
+              title={tx("Python", "Python")}
               description={tx(
                 "Executável local do Python usado para criar e gerenciar a venv de voz.",
                 "Local Python executable used to create and manage the voice venv.",
@@ -711,7 +872,7 @@ export const SettingsVoice: Component = () => {
                 triggerVariant="settings"
               />
             </Row>
-            <Row title="Dtype" description={tx("Tipo principal do torch para o runtime de TTS.", "Primary torch dtype for the TTS runtime.")}>
+            <Row title={tx("Precisao", "Dtype")} description={tx("Tipo principal do torch para o runtime de TTS.", "Primary torch dtype for the TTS runtime.")}>
               <Select
                 options={[...dtypes]}
                 current={dtypes.find((item) => item.value === draft.runtime.dtype)}
@@ -723,7 +884,7 @@ export const SettingsVoice: Component = () => {
                 triggerVariant="settings"
               />
             </Row>
-            <Row title="HF token" description={tx("Necessário para diarização e assets protegidos do Hugging Face.", "Required for diarization and gated Hugging Face assets.")}>
+            <Row title={tx("Token do Hugging Face", "HF token")} description={tx("Necessario para diarizacao e assets protegidos do Hugging Face.", "Required for diarization and gated Hugging Face assets.")}>
               <div class="w-full sm:w-[320px]">
                 <TextField
                   type="password"
@@ -735,7 +896,7 @@ export const SettingsVoice: Component = () => {
           </SettingsList>
         </Section>
 
-        <Section title="STT">
+        <Section title="WhisperX">
           <SettingsList>
             <Row
               title={tx("Modelo", "Model")}
@@ -746,10 +907,27 @@ export const SettingsVoice: Component = () => {
             >
                 <div class="flex w-full flex-col gap-2 sm:w-[280px]">
                   <Select
-                    options={models()}
-                    current={models().find((item) => item.value === draft.stt.model)}
+                    options={modelOptions()}
+                    current={modelOptions().find((item) => item.value === draft.stt.model)}
                     value={(item) => item.value}
-                    label={(item) => item.label}
+                    label={(item) => `${item.label} • ${item.state}`}
+                    children={(item) =>
+                      item && (
+                        <div class="flex min-w-0 items-center justify-between gap-3">
+                          <span class="truncate">{item.label}</span>
+                          <span
+                            class="shrink-0 text-11-regular"
+                            classList={{
+                              "text-status-warning-base": item.loading,
+                              "text-status-success-base": item.downloaded && !item.loading,
+                              "text-text-weak": !item.downloaded && !item.loading,
+                            }}
+                          >
+                            {item.state}
+                          </span>
+                        </div>
+                      )
+                    }
                     onSelect={(item) => {
                       if (!item) return
                       setStore("custom", false)
@@ -759,33 +937,6 @@ export const SettingsVoice: Component = () => {
                     size="small"
                     triggerVariant="settings"
                   />
-                  <div class="flex flex-wrap gap-2">
-                    <For each={modelList()}>
-                      {(item) => (
-                        <button
-                          type="button"
-                          class="rounded-full border px-2.5 py-1 text-11-medium transition-colors"
-                          classList={{
-                            "border-border-strong-base bg-surface-raised-base text-text-strong": item.active,
-                            "border-border-weak-base text-text-weak": !item.active,
-                          }}
-                          onClick={() => {
-                            setStore("custom", false)
-                            setDraft("stt", "model", item.value)
-                          }}
-                        >
-                          {item.label}
-                          <span class="ml-1 text-10-regular text-text-weak">
-                            {item.loading
-                              ? tx(`preparando ${item.progress ?? 0}%`, `loading ${item.progress ?? 0}%`)
-                              : item.downloaded
-                                ? tx("baixado", "downloaded")
-                                : tx("não baixado", "not downloaded")}
-                          </span>
-                        </button>
-                      )}
-                    </For>
-                  </div>
                   <div class="flex items-center gap-2">
                     <Button size="small" variant="secondary" onClick={() => setStore("custom", !store.custom)}>
                       {store.custom ? tx("Fechar modelo customizado", "Hide custom model") : tx("Usar modelo customizado", "Use custom model")}
@@ -850,7 +1001,7 @@ export const SettingsVoice: Component = () => {
             <Row title={tx("Diarização", "Diarization")} description={tx("Atribui rótulos de falante quando houver um token válido do Hugging Face.", "Assign speaker labels when a valid Hugging Face token is configured.")}>
               <Switch checked={draft.stt.diarization} onChange={(value) => setDraft("stt", "diarization", value)} />
             </Row>
-            <Row title="VAD" description={tx("Executa detecção de atividade de voz antes da transcrição.", "Run voice activity detection before transcription.")}>
+            <Row title={tx("Detector de voz", "VAD")} description={tx("Executa deteccao de atividade de voz antes da transcricao.", "Run voice activity detection before transcription.")}>
               <Switch checked={draft.stt.vad} onChange={(value) => setDraft("stt", "vad", value)} />
             </Row>
             <Row title={tx("Tamanho do lote", "Batch size")} description={tx("Tamanho do lote da transcrição. Valores maiores usam mais memória.", "Transcription batch size. Higher values use more memory.")}>
@@ -874,7 +1025,7 @@ export const SettingsVoice: Component = () => {
           </SettingsList>
         </Section>
 
-        <Section title="TTS">
+        <Section title="OmniVoice">
           <SettingsList>
             <Row title={tx("Fala em tempo real", "Live playback")} description={tx("Sintetiza o texto do assistente enquanto a resposta ainda está chegando.", "Synthesize assistant text while the answer is still streaming.")}>
               <Switch checked={draft.tts.live} onChange={(value) => setDraft("tts", "live", value)} />
@@ -1253,6 +1404,86 @@ function Row(props: { title: string; description: string; children: JSX.Element 
         <span class="text-12-regular text-text-weak">{props.description}</span>
       </div>
       <div class="flex w-full justify-end sm:w-auto sm:shrink-0">{props.children}</div>
+    </div>
+  )
+}
+
+function InstallCard(props: {
+  title: string
+  description: string
+  state: string
+  action: string
+  onAction: () => void
+  tags: Array<{ label: string; tone: "good" | "warn" | "muted" }>
+  tone?: "good" | "warn" | "muted"
+  note?: string
+  progress?: number
+  busy?: boolean
+}) {
+  const bar = () => Math.max(0, Math.min(100, props.progress ?? 0))
+  const fill = () =>
+    props.tone === "good"
+      ? "var(--status-success-base)"
+      : props.tone === "warn"
+        ? "var(--status-warning-base)"
+        : "var(--text-info)"
+
+  return (
+    <div class="flex min-h-[220px] flex-col gap-3 rounded-[14px] border border-border-weak-base bg-surface-base p-4">
+      <div class="flex flex-col gap-1">
+        <div class="text-14-medium text-text-strong">{props.title}</div>
+        <div class="text-12-regular text-text-weak">{props.description}</div>
+      </div>
+      <div class="rounded-[10px] bg-surface-raised-base px-3 py-2">
+        <div class="text-12-medium text-text-strong">{props.state}</div>
+        <Show when={props.note}>
+          {(note) => <div class="pt-1 text-11-regular text-text-weak">{note()}</div>}
+        </Show>
+        <Show when={props.progress != null}>
+          <div class="pt-2">
+            <div class="h-1.5 overflow-hidden rounded-full bg-background-strong">
+              <div
+                class="h-full rounded-full transition-all"
+                style={{
+                  width: `${bar()}%`,
+                  "background-color": fill(),
+                }}
+              />
+            </div>
+            <div class="pt-1 text-11-regular text-text-weak">{bar()}%</div>
+          </div>
+        </Show>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <For each={props.tags}>
+          {(item) => (
+            <span
+              class="rounded-full px-2.5 py-1 text-11-medium"
+              style={{
+                color:
+                  item.tone === "good"
+                    ? "var(--status-success-base)"
+                    : item.tone === "warn"
+                      ? "var(--status-warning-base)"
+                      : "var(--text-weak)",
+                "background-color":
+                  item.tone === "good"
+                    ? "color-mix(in oklab, var(--status-success-base) 14%, transparent)"
+                    : item.tone === "warn"
+                      ? "color-mix(in oklab, var(--status-warning-base) 16%, transparent)"
+                      : "color-mix(in oklab, var(--text-weak) 12%, transparent)",
+              }}
+            >
+              {item.label}
+            </span>
+          )}
+        </For>
+      </div>
+      <div class="mt-auto pt-1">
+        <Button size="small" variant={props.busy ? "secondary" : "primary"} onClick={props.onAction}>
+          {props.action}
+        </Button>
+      </div>
     </div>
   )
 }

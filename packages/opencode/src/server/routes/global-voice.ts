@@ -3,6 +3,7 @@ import { describeRoute, resolver, validator } from "hono-openapi"
 import {
   AssetInput,
   AssetOutput,
+  CancelInput,
   EnsureInput,
   ReferenceInput,
   ReferenceOutput,
@@ -42,7 +43,7 @@ export const GlobalVoiceRoutes = () =>
       "/ensure",
       describeRoute({
         summary: "Ensure voice runtime",
-        description: "Install and initialize the local voice runtime, Python environment, ffmpeg, and models.",
+        description: "Install and initialize the local voice runtime, Python environment, ffmpeg, and models for one or all voice engines.",
         operationId: "global.voice.ensure",
         responses: {
           200: {
@@ -59,6 +60,29 @@ export const GlobalVoiceRoutes = () =>
       validator("json", EnsureInput),
       async (c) => {
         return c.json(await Voice.ensure(c.req.valid("json")))
+      },
+    )
+    .post(
+      "/cancel",
+      describeRoute({
+        summary: "Cancel voice install",
+        description: "Cancel the current voice installation, warmup, or preload task.",
+        operationId: "global.voice.cancel",
+        responses: {
+          200: {
+            description: "Voice status",
+            content: {
+              "application/json": {
+                schema: resolver(Status),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("json", CancelInput),
+      async (c) => {
+        return c.json(await Voice.cancel(c.req.valid("json")))
       },
     )
     .post(

@@ -10,7 +10,7 @@ import type {
 } from "@opencode-ai/sdk/v2/client"
 import { showToast } from "@opencode-ai/ui/toast"
 import { getFilename } from "@opencode-ai/util/path"
-import { createContext, getOwner, onCleanup, onMount, type ParentProps, untrack, useContext } from "solid-js"
+import { createContext, createEffect, getOwner, onCleanup, onMount, type ParentProps, untrack, useContext } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useLanguage } from "@/context/language"
 import { Persist, persisted } from "@/utils/persist"
@@ -402,6 +402,51 @@ function createGlobalSync() {
         throw error
       })
   }
+
+  createEffect(() => {
+    if (!globalStore.ready) return
+    if (globalStore.config.voice?.runtime?.enabled === false) return
+
+    let dead = false
+    let run = false
+    const tick = async () => {
+      if (run) return
+      run = true
+      try {
+        const res = await globalSDK.client.global.voice.status().catch(() => undefined)
+        const out = res?.data
+        if (!out || dead) return
+        if (out.engines.stt.installed) {
+          await globalSDK.client.global.voice.ensure({
+            voiceEnsureInput: {
+              target: "stt",
+              preload: true,
+            },
+          }).catch(() => undefined)
+        }
+        if (out.engines.tts.installed) {
+          await globalSDK.client.global.voice.ensure({
+            voiceEnsureInput: {
+              target: "tts",
+              preload: true,
+            },
+          }).catch(() => undefined)
+        }
+      } finally {
+        run = false
+      }
+    }
+
+    void tick()
+    const id = setInterval(() => {
+      void tick()
+    }, 4 * 60 * 1000)
+
+    onCleanup(() => {
+      dead = true
+      clearInterval(id)
+    })
+  })
 
   return {
     data: globalStore,

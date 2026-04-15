@@ -59,6 +59,8 @@ import type {
   GlobalUpgradeResponses,
   GlobalVoiceAssetErrors,
   GlobalVoiceAssetResponses,
+  GlobalVoiceCancelErrors,
+  GlobalVoiceCancelResponses,
   GlobalVoiceEnsureErrors,
   GlobalVoiceEnsureResponses,
   GlobalVoiceReferenceErrors,
@@ -222,6 +224,7 @@ import type {
   VcsSyncResponses,
   VcsUnstageResponses,
   VoiceAssetInput,
+  VoiceCancelInput,
   VoiceEnsureInput,
   VoiceReferenceInput,
   VoiceSynthesizeInput,
@@ -335,7 +338,7 @@ export class Voice extends HeyApiClient {
   /**
    * Ensure voice runtime
    *
-   * Install and initialize the local voice runtime, Python environment, ffmpeg, and models.
+   * Install and initialize the local voice runtime, Python environment, ffmpeg, and models for one or all voice engines.
    */
   public ensure<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -346,6 +349,30 @@ export class Voice extends HeyApiClient {
     const params = buildClientParams([parameters], [{ args: [{ key: "voiceEnsureInput", map: "body" }] }])
     return (options?.client ?? this.client).post<GlobalVoiceEnsureResponses, GlobalVoiceEnsureErrors, ThrowOnError>({
       url: "/global/voice/ensure",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Cancel voice install
+   *
+   * Cancel the current voice installation, warmup, or preload task.
+   */
+  public cancel<ThrowOnError extends boolean = false>(
+    parameters?: {
+      voiceCancelInput?: VoiceCancelInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "voiceCancelInput", map: "body" }] }])
+    return (options?.client ?? this.client).post<GlobalVoiceCancelResponses, GlobalVoiceCancelErrors, ThrowOnError>({
+      url: "/global/voice/cancel",
       ...options,
       ...params,
       headers: {

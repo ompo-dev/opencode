@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Paths, Status, voiceCfg, voiceDesignText, voiceInput, voicePreset, voiceTags } from "./schema"
+import { CancelInput, EnsureInput, Paths, Status, voiceCfg, voiceDesignText, voiceInput, voicePreset, voiceTags } from "./schema"
 
 describe("voiceCfg", () => {
   test("fills defaults", () => {
@@ -117,6 +117,10 @@ describe("voiceCfg", () => {
       diarization: false,
       worker: true,
       ffmpeg: true,
+      deps: {
+        python: true,
+        ffmpeg: true,
+      },
       activity: {
         target: "all",
         stage: "warm:tts",
@@ -179,5 +183,10 @@ describe("voiceCfg", () => {
 
     expect(out.engines.stt.models?.[0]?.downloaded).toBe(true)
     expect(out.activity.progress).toBe(92)
+  })
+
+  test("accepts targeted ensure and cancel inputs", () => {
+    expect(EnsureInput.parse({ preload: true, target: "stt" }).target).toBe("stt")
+    expect(CancelInput.parse({ target: "tts" }).target).toBe("tts")
   })
 })

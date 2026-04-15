@@ -130,6 +130,11 @@ export type KanbanOperation =
 
 export type VoicePhase = "disabled" | "idle" | "ensuring" | "starting" | "ready" | "busy" | "error"
 
+export type VoiceDependencyStatus = {
+  python: boolean
+  ffmpeg: boolean
+}
+
 export type VoiceActivity = {
   target: "stt" | "tts" | "all" | null
   stage?: string
@@ -264,6 +269,7 @@ export type VoiceStatus = {
   diarization: boolean
   worker: boolean
   ffmpeg: boolean
+  deps: VoiceDependencyStatus
   error?: string
   activity: VoiceActivity
   engines: {
@@ -284,6 +290,11 @@ export type BadRequestError = {
 
 export type VoiceEnsureInput = {
   preload?: boolean
+  target?: "all" | "stt" | "tts"
+}
+
+export type VoiceCancelInput = {
+  target?: "all" | "stt" | "tts"
 }
 
 export type VoiceAssetOutput = {
@@ -2634,6 +2645,31 @@ export type GlobalVoiceEnsureResponses = {
 }
 
 export type GlobalVoiceEnsureResponse = GlobalVoiceEnsureResponses[keyof GlobalVoiceEnsureResponses]
+
+export type GlobalVoiceCancelData = {
+  body?: VoiceCancelInput
+  path?: never
+  query?: never
+  url: "/global/voice/cancel"
+}
+
+export type GlobalVoiceCancelErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalVoiceCancelError = GlobalVoiceCancelErrors[keyof GlobalVoiceCancelErrors]
+
+export type GlobalVoiceCancelResponses = {
+  /**
+   * Voice status
+   */
+  200: VoiceStatus
+}
+
+export type GlobalVoiceCancelResponse = GlobalVoiceCancelResponses[keyof GlobalVoiceCancelResponses]
 
 export type GlobalVoiceAssetData = {
   body?: VoiceAssetInput

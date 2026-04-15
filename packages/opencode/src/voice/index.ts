@@ -18,6 +18,7 @@ import { which } from "@/util/which"
 import {
   AssetInput,
   AssetOutput,
+  CancelInput,
   type VoiceConfigResolved,
   type VoiceStatus,
   EnsureInput,
@@ -169,6 +170,7 @@ export namespace Voice {
     active?: Kind
     task?: Task
     ensure?: Promise<void>
+    abort?: AbortController
     queue: Promise<void>
   }
 
@@ -287,6 +289,17 @@ export namespace Voice {
     })
   }
 
+  function abortError() {
+    const err = new Error("Voice ensure cancelled")
+    err.name = "AbortError"
+    return err
+  }
+
+  function aborted(err: unknown) {
+    if (!(err instanceof Error)) return false
+    return err.name === "AbortError" || err.message === "Voice ensure cancelled"
+  }
+
   async function installNeeded(next: PathInfo, config: VoiceConfigResolved, kind: Kind) {
     const info = await json(envInfo(next, kind).marker)
     if (!info) return true
@@ -299,12 +312,11 @@ export namespace Voice {
     return installNeeded(next, config, kind)
   }
 
-  async function ensureFfmpeg(next: PathInfo) {
+  async function detectFfmpeg(next: PathInfo): Promise<Bin> {
     const ffmpeg = path.join(next.ffmpeg_dir, process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg")
     const ffprobe = path.join(next.ffmpeg_dir, process.platform === "win32" ? "ffprobe.exe" : "ffprobe")
     if ((await Filesystem.exists(ffmpeg)) && (await Filesystem.exists(ffprobe))) {
-      state.bin = { ffmpeg, ffprobe }
-      return state.bin
+      return { ffmpeg, ffprobe }
     }
 
     const sys = {
@@ -312,7 +324,18 @@ export namespace Voice {
       ffprobe: which("ffprobe") ?? undefined,
     }
     if (sys.ffmpeg && sys.ffprobe) {
-      state.bin = sys
+      return sys
+    }
+
+    return {}
+  }
+
+  async function ensureFfmpeg(next: PathInfo, abort?: AbortSignal) {
+    const ffmpeg = path.join(next.ffmpeg_dir, process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg")
+    const ffprobe = path.join(next.ffmpeg_dir, process.platform === "win32" ? "ffprobe.exe" : "ffprobe")
+    const found = await detectFfmpeg(next)
+    if (found.ffmpeg && found.ffprobe) {
+      state.bin = found
       return state.bin
     }
 
@@ -322,7 +345,7 @@ export namespace Voice {
     }
 
     log.info("downloading ffmpeg", { url: win.url })
-    const res = await fetch(win.url)
+    const res = await fetch(win.url, { signal: abort })
     if (!res.ok) throw new Error(`Failed to download ffmpeg: ${res.status}`)
     const buf = await res.arrayBuffer()
     const zip = new ZipReader(new BlobReader(new Blob([buf])))
@@ -343,12 +366,17 @@ export namespace Voice {
     return state.bin
   }
 
-  async function run(cmd: string[], cwd?: string, env?: NodeJS.ProcessEnv) {
+  async function run(cmd: string[], cwd?: string, env?: NodeJS.ProcessEnv, abort?: AbortSignal) {
     const out = await Process.run(cmd, {
       cwd,
       env,
       stdin: "ignore",
+      abort,
+    }).catch((err) => {
+      if (abort?.aborted) throw abortError()
+      throw err
     })
+    if (abort?.aborted) throw abortError()
     if (out.stdout.length) log.info(out.stdout.toString().trim())
     if (out.stderr.length) log.info(out.stderr.toString().trim())
     return out
@@ -364,13 +392,13 @@ export namespace Voice {
     return file
   }
 
-  async function ensureVenv(next: PathInfo, config: VoiceConfigResolved, kind: Kind) {
+  async function ensureVenv(next: PathInfo, config: VoiceConfigResolved, kind: Kind, abort?: AbortSignal) {
     const item = envInfo(next, kind)
     if (!(await Filesystem.exists(config.runtime.python))) {
       throw new Error(`Python not found: ${config.runtime.python}`)
     }
     if (!(await Filesystem.exists(item.python))) {
-      await run([config.runtime.python, "-m", "venv", item.venv], item.root)
+      await run([config.runtime.python, "-m", "venv", item.venv], item.root, undefined, abort)
     }
     if (!(await installNeeded(next, config, kind))) return
 
@@ -387,8 +415,8 @@ export namespace Voice {
           ]
         : ["-m", "pip", "install", `torch==${install.torch}`, `torchaudio==${install.torchaudio}`]
 
-    await run([item.python, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"], item.root)
-    await run([item.python, ...torch], item.root)
+    await run([item.python, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"], item.root, undefined, abort)
+    await run([item.python, ...torch], item.root, undefined, abort)
     await run(
       [
         item.python,
@@ -398,6 +426,8 @@ export namespace Voice {
         ...(kind == "stt" ? [`whisperx==${install.whisperx}`] : [`omnivoice==${install.omnivoice}`, "soundfile"]),
       ],
       item.root,
+      undefined,
+      abort,
     )
     await Filesystem.writeJson(item.marker, spec(kind, config))
   }
@@ -586,6 +616,8 @@ function audioType(file: string) {
       await state.ensure
       return
     }
+    const abort = new AbortController()
+    state.abort = abort
     state.ensure = (async () => {
       const config = await cfg()
       if (!config.runtime.enabled) {
@@ -598,18 +630,21 @@ function audioType(file: string) {
       await task({ target, stage: "dirs", progress: 5 })
       await dirs(next)
       await task({ target, stage: "ffmpeg", progress: 12 })
-      await ensureFfmpeg(next)
+      abort.signal.throwIfAborted()
+      await ensureFfmpeg(next, abort.signal)
       if (!state.bin.ffmpeg || !state.bin.ffprobe) throw new Error("ffmpeg is unavailable")
       const list = target == "all" ? (["stt", "tts"] as const) : [target]
       for (const [idx, item] of list.entries()) {
+        abort.signal.throwIfAborted()
         await task({
           target,
           stage: `install:${item}`,
           progress: 20 + Math.round(((idx + 1) / Math.max(1, list.length)) * 30),
         })
-        await ensureVenv(next, config, item)
+        await ensureVenv(next, config, item, abort.signal)
       }
       for (const [idx, item] of list.entries()) {
+        abort.signal.throwIfAborted()
         let worker = state.workers[item]
         if (worker && worker.sig !== sig(item, config)) {
           await stop(item)
@@ -629,6 +664,7 @@ function audioType(file: string) {
           stage: `warm:${item}`,
           progress: 72 + Math.round(((idx + 1) / Math.max(1, list.length)) * 28),
         })
+        abort.signal.throwIfAborted()
         await warm(worker, config)
         if (item === "stt") await mark(next, config.stt.model)
       }
@@ -636,11 +672,19 @@ function audioType(file: string) {
       await set("ready", { device: state.device })
     })()
       .catch(async (err) => {
+        if (abort.signal.aborted || aborted(err)) {
+          await set(Object.values(state.workers).some(Boolean) ? "ready" : "idle", {
+            device: state.device,
+            err: undefined,
+          })
+          return
+        }
         await set("error", { err: err instanceof Error ? err.message : String(err) })
         throw err
       })
       .finally(async () => {
         await task()
+        if (state.abort === abort) state.abort = undefined
         state.ensure = undefined
       })
     await state.ensure
@@ -726,11 +770,14 @@ function audioType(file: string) {
   export async function status() {
     const config = await cfg()
     const next = paths()
-    const [sttInstalled, ttsInstalled, saved] = await Promise.all([
+    const [sttInstalled, ttsInstalled, saved, ffmpegBin, pythonFound] = await Promise.all([
       Filesystem.exists(next.stt_python).then((hit) => hit && Filesystem.exists(next.stt_marker)),
       Filesystem.exists(next.tts_python).then((hit) => hit && Filesystem.exists(next.tts_marker)),
       registry(next),
+      state.bin.ffmpeg && state.bin.ffprobe ? Promise.resolve(state.bin) : detectFfmpeg(next),
+      Filesystem.exists(config.runtime.python),
     ])
+    if (!state.bin.ffmpeg && ffmpegBin.ffmpeg && ffmpegBin.ffprobe) state.bin = ffmpegBin
     const stt = state.workers.stt
     const tts = state.workers.tts
     const taskInfo = state.task
@@ -750,7 +797,11 @@ function audioType(file: string) {
       device: state.device,
       diarization: config.stt.diarization && !!config.runtime.hf_token,
       worker: !!stt || !!tts,
-      ffmpeg: !!state.bin.ffmpeg && !!state.bin.ffprobe,
+      ffmpeg: !!ffmpegBin.ffmpeg && !!ffmpegBin.ffprobe,
+      deps: {
+        python: pythonFound,
+        ffmpeg: !!ffmpegBin.ffmpeg && !!ffmpegBin.ffprobe,
+      },
       error: state.err,
       activity: {
         target: taskInfo?.target ?? null,
@@ -802,15 +853,31 @@ function audioType(file: string) {
       config,
       paths: {
         ...next,
-        ffmpeg: state.bin.ffmpeg,
-        ffprobe: state.bin.ffprobe,
+        ffmpeg: ffmpegBin.ffmpeg,
+        ffprobe: ffmpegBin.ffprobe,
       },
     })
   }
 
   export async function ensure(input: z.input<typeof EnsureInput> = {}) {
     const opts = EnsureInput.parse(input)
-    await ensureTarget("all", !!opts.preload)
+    await ensureTarget(opts.target ?? "all", !!opts.preload)
+    return status()
+  }
+
+  export async function cancel(input: z.input<typeof CancelInput> = {}) {
+    const opts = CancelInput.parse(input)
+    const target = opts.target ?? state.task?.target ?? "all"
+    if (state.abort && touches("stt", state.task) && target === "stt") {
+      state.abort.abort()
+    }
+    if (state.abort && touches("tts", state.task) && target === "tts") {
+      state.abort.abort()
+    }
+    if (state.abort && target === "all") {
+      state.abort.abort()
+    }
+    if (state.ensure) await state.ensure
     return status()
   }
 
