@@ -15,6 +15,7 @@ import { formatServerError } from "@/utils/server-errors"
 import { startPromptRecording } from "./prompt-input/voice"
 import { SettingsList } from "./settings-list"
 import {
+  Status,
   type VoiceConfigResolved,
   type VoicePreset,
   type VoiceStatus,
@@ -360,7 +361,7 @@ export const SettingsVoice: Component = () => {
 
   const load = async () => {
     const res = await globalSDK.client.global.voice.status()
-    if (res.data) setStatus(res.data)
+    if (res.data) setStatus(Status.parse(res.data))
   }
 
   const notify = (error: unknown) => {
@@ -391,7 +392,7 @@ export const SettingsVoice: Component = () => {
       const res = await globalSDK.client.global.voice.ensure({
         voiceEnsureInput: { preload, target },
       })
-      if (res.data) setStatus(res.data)
+      if (res.data) setStatus(Status.parse(res.data))
     } catch (error) {
       notify(error)
     } finally {
@@ -406,7 +407,7 @@ export const SettingsVoice: Component = () => {
       const res = await globalSDK.client.global.voice.cancel({
         voiceCancelInput: { target },
       })
-      if (res.data) setStatus(res.data)
+      if (res.data) setStatus(Status.parse(res.data))
     } catch (error) {
       notify(error)
     } finally {
@@ -609,7 +610,7 @@ export const SettingsVoice: Component = () => {
 
   const off = globalSDK.event.on("global", (event) => {
     if (event.type !== "voice.updated") return
-    setStatus(event.properties as VoiceStatus)
+    setStatus(Status.parse(event.properties))
   })
 
   onCleanup(() => {
@@ -1433,6 +1434,50 @@ export const SettingsVoice: Component = () => {
                   value={String(draft.stt.call_partial_interval_ms)}
                   onChange={(value) => setDraft("stt", "call_partial_interval_ms", Math.max(100, Number(value) || 700))}
                 />
+              </div>
+            </Row>
+            <Row
+              title={tx("Sensibilidade do microfone", "Microphone sensitivity")}
+              description={tx(
+                "Controla o quanto a call reage a sinais mais baixos. Suba se sua voz estiver entrando tarde demais.",
+                "Controls how aggressively call VAD reacts to quieter input. Raise it if your voice is being picked up too late.",
+              )}
+            >
+              <div class="flex items-center gap-3 w-full sm:w-[220px]">
+                <input
+                  class="w-full"
+                  type="range"
+                  min="0.5"
+                  max="2"
+                  step="0.05"
+                  value={draft.stt.call_sensitivity}
+                  onInput={(event) => setDraft("stt", "call_sensitivity", Number(event.currentTarget.value))}
+                />
+                <span class="text-12-regular text-text-weak w-10 text-right">
+                  {Math.round(draft.stt.call_sensitivity * 100)}%
+                </span>
+              </div>
+            </Row>
+            <Row
+              title={tx("Piso de ruido", "Noise floor")}
+              description={tx(
+                "Base minima do detector de voz. Suba se ruido de fundo estiver abrindo fala falsa; baixe se ele estiver surdo.",
+                "Minimum base for the voice detector. Raise it if background noise opens false speech; lower it if the mic feels too deaf.",
+              )}
+            >
+              <div class="flex items-center gap-3 w-full sm:w-[240px]">
+                <input
+                  class="w-full"
+                  type="range"
+                  min="0.001"
+                  max="0.02"
+                  step="0.001"
+                  value={draft.stt.call_floor}
+                  onInput={(event) => setDraft("stt", "call_floor", Number(event.currentTarget.value))}
+                />
+                <span class="text-12-regular text-text-weak w-12 text-right">
+                  {draft.stt.call_floor.toFixed(3)}
+                </span>
               </div>
             </Row>
             <Row

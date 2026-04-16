@@ -207,11 +207,19 @@ export function createMessageVoice(input: {
   let bad = false
   let done = ""
   let mute = ""
+  let seed = input.status().type === "idle" ? (input.msg() ?? "") : ""
   let wait: ReturnType<typeof setTimeout> | undefined
   let rev = 0
-  let audio: HTMLAudioElement | undefined
   const preset = () => input.cfg().tts.default_preset ?? input.cfg().tts.presets[0]?.id
   const gain = () => Math.max(0, Math.min(1, input.volume()))
+  const queue = createAudioQueue({
+    muted: input.mute,
+    volume: gain,
+    prefer: "htmlaudio",
+    note: (state) => {
+      voiceDebug.queue(state)
+    },
+  })
   const clear = () => {
     if (wait === undefined) return
     clearTimeout(wait)
@@ -219,93 +227,14 @@ export function createMessageVoice(input: {
   }
   const enabled = () => (input.enabled ? input.enabled() : true) && input.cfg().runtime.enabled && input.cfg().tts.autoplay
 
-  const init = () => {
-    if (audio || typeof Audio === "undefined") return
-    audio =
-      typeof document === "undefined"
-        ? new Audio()
-        : Object.assign(document.createElement("audio"), {
-            preload: "metadata",
-            style: "display:none",
-          })
-    if (typeof document !== "undefined") document.body.append(audio)
-    audio.onplay = () => {
-      voiceDebug.queue({
-        state: "playing",
-        pending: 1,
-        mode: "htmlaudio",
-        muted: input.mute(),
-        volume: gain(),
-        error: undefined,
-      })
-    }
-    audio.onpause = () => {
-      if (!audio?.src) return
-      voiceDebug.queue({
-        state: "idle",
-        pending: 0,
-        mode: "htmlaudio",
-        muted: input.mute(),
-        volume: gain(),
-        error: undefined,
-      })
-    }
-    audio.onended = () => {
-      if (audio) audio.currentTime = 0
-      voiceDebug.queue({
-        state: "idle",
-        pending: 0,
-        mode: "htmlaudio",
-        muted: input.mute(),
-        volume: gain(),
-        error: undefined,
-      })
-    }
-    audio.onerror = () => {
-      voiceDebug.queue({
-        state: "error",
-        pending: 0,
-        mode: "htmlaudio",
-        muted: input.mute(),
-        volume: gain(),
-        error: "Audio playback failed.",
-      })
-    }
-  }
-
   const sync = () => {
-    init()
-    if (!audio) return
-    audio.muted = input.mute()
-    audio.volume = input.mute() ? 0 : gain()
-    voiceDebug.queue({
-      state: audio.paused ? "idle" : "playing",
-      pending: audio.src ? 1 : 0,
-      mode: "htmlaudio",
-      muted: input.mute(),
-      volume: gain(),
-      error: undefined,
-    })
+    queue.update()
   }
 
   const reset = () => {
     rev += 1
     clear()
-    if (audio) {
-      audio.pause()
-      audio.currentTime = 0
-      audio.removeAttribute("src")
-      audio.src = ""
-      if (typeof audio.load === "function") audio.load()
-    }
-    voiceDebug.queue({
-      state: "idle",
-      pending: 0,
-      mode: "htmlaudio",
-      muted: input.mute(),
-      volume: gain(),
-      error: undefined,
-    })
+    queue.clear()
   }
 
   const plan = (msg?: string, text?: string) => {
@@ -325,14 +254,6 @@ export function createMessageVoice(input: {
         text,
         error: undefined,
       })
-      voiceDebug.queue({
-        state: "loading",
-        pending: 1,
-        mode: "htmlaudio",
-        muted: input.mute(),
-        volume: gain(),
-        error: undefined,
-      })
       const res = await input.globalSDK.client.global.voice
         .synthesize({
           voiceSynthesizeInput: voiceInput({
@@ -350,14 +271,6 @@ export function createMessageVoice(input: {
             preset: preset(),
             error: message,
           })
-          voiceDebug.queue({
-            state: "error",
-            pending: 0,
-            mode: "htmlaudio",
-            muted: input.mute(),
-            volume: gain(),
-            error: message,
-          })
           showToast({ title: "Voice failed", description: message })
         })
       if (turn !== rev || !res?.data || input.msg() !== msg) return
@@ -370,38 +283,12 @@ export function createMessageVoice(input: {
         error: undefined,
       })
       if (!src) {
-        voiceDebug.queue({
-          state: "idle",
-          pending: 0,
-          mode: "htmlaudio",
-          muted: input.mute(),
-          volume: gain(),
-          error: undefined,
-        })
         return
       }
       bad = false
       done = key
-      init()
-      if (!audio) return
-      audio.pause()
-      audio.currentTime = 0
-      audio.src = src
-      sync()
-      await audio.play().catch((error) => {
-        if (turn !== rev || bad) return
-        bad = true
-        const message = formatServerError(error, undefined, "Audio playback failed")
-        voiceDebug.queue({
-          state: "error",
-          pending: 0,
-          mode: "htmlaudio",
-          muted: input.mute(),
-          volume: gain(),
-          error: message,
-        })
-        showToast({ title: "Voice failed", description: message })
-      })
+      queue.clear()
+      queue.enqueue(src)
     }, 0)
   }
 
@@ -414,7 +301,7 @@ export function createMessageVoice(input: {
   createEffect((prev) => {
     const next = input.msg()
     if (!prev && next) {
-      mute = next
+      mute = seed && next === seed ? next : ""
       return next
     }
     if (prev && prev !== next) {
@@ -431,6 +318,7 @@ export function createMessageVoice(input: {
       reset()
       done = ""
       mute = ""
+      seed = ""
     }
     return next
   })
@@ -492,8 +380,7 @@ export function createMessageVoice(input: {
 
   onCleanup(() => {
     reset()
-    if (audio && "remove" in audio && typeof audio.remove === "function") audio.remove()
-    audio = undefined
+    queue.dispose()
     voiceDebug.tts({
       state: "idle",
       error: undefined,

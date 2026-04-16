@@ -187,6 +187,8 @@ export type VoiceSttConfig = {
   beam_size: number
   call_partial_interval_ms: number
   call_pause_profile: VoicePauseProfile
+  call_sensitivity: number
+  call_floor: number
   short_pause_ms: number
   medium_pause_ms: number
   long_pause_ms: number
@@ -1767,6 +1769,8 @@ export type VoiceStt = {
   beam_size?: number
   call_partial_interval_ms?: number
   call_pause_profile?: VoicePauseProfile
+  call_sensitivity?: number
+  call_floor?: number
   short_pause_ms?: number
   medium_pause_ms?: number
   long_pause_ms?: number

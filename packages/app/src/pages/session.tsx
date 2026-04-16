@@ -514,7 +514,14 @@ export default function Page() {
     }
     if (!prev) return
     const last = messages().find((item): item is AssistantMessage => item.role === "assistant" && item.id === prev.id)
-    if (!last) return
+    if (!last) {
+      const tail = messages().findLast((item): item is AssistantMessage => item.role === "assistant")
+      if (!tail) return
+      return {
+        id: tail.id,
+        parts: sync.data.part[tail.id] ?? [],
+      }
+    }
     return {
       id: last.id,
       parts: sync.data.part[last.id] ?? [],

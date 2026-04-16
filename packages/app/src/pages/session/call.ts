@@ -1,19 +1,13 @@
 import { showToast } from "@opencode-ai/ui/toast"
 import type { Part, SessionStatus } from "@opencode-ai/sdk/v2"
-import { createAudioQueue, type AudioQueueState, voiceInput, type VoiceConfigResolved } from "@opencode-ai/voice"
+import { createAudioQueue, voiceInput, type VoiceConfigResolved } from "@opencode-ai/voice"
 import { createEffect, onCleanup, type Accessor } from "solid-js"
 import type { useGlobalSDK } from "@/context/global-sdk"
 import { voiceCall } from "@/context/voice-call"
 import { voiceDebug } from "@/context/voice-debug"
-import { formatServerError } from "@/utils/server-errors"
 import { startVoiceStream } from "@/components/prompt-input/voice"
-import { createVoiceCtrl, joinVoiceText } from "./message-voice"
-
-const idle = 0.08
-const step = (text: string, base: number, effort: number, low: number, high: number) => {
-  const cap = text.trim().length <= 12 ? low + 2 : text.trim().length <= 32 ? high - 2 : high
-  return Math.max(low, Math.min(cap, Math.round(base * effort)))
-}
+import { formatServerError } from "@/utils/server-errors"
+import { joinVoiceText } from "./message-voice"
 
 export function createSessionCall(input: {
   globalSDK: ReturnType<typeof useGlobalSDK>
@@ -32,6 +26,7 @@ export function createSessionCall(input: {
   let mic: Awaited<ReturnType<typeof startVoiceStream>> | undefined
   let beat: ReturnType<typeof setInterval> | undefined
   let timer: ReturnType<typeof setInterval> | undefined
+  let wait: ReturnType<typeof setTimeout> | undefined
   let at = 0
   let floor = 0.004
   let gate = 0
@@ -40,15 +35,48 @@ export function createSessionCall(input: {
   let talk = false
   let busy = false
   let bad = false
+  let play = false
+  let load = false
   let seed = ""
-  let sync: ReturnType<typeof setTimeout> | undefined
-  let next = {
-    msg: "",
-    text: "",
-    done: false,
+  let done = ""
+  let mute = ""
+  let rev = 0
+
+  const preset = () => input.cfg().tts.default_preset ?? input.cfg().tts.presets[0]?.id
+  const on = () => voiceCall.state.active && input.cfg().runtime.enabled
+  const gain = () => Math.max(0, Math.min(1, input.volume()))
+  const queue = createAudioQueue({
+    muted: input.mute,
+    volume: gain,
+    prefer: "htmlaudio",
+    note: (next) => {
+      load = next.state === "loading" || next.state === "blocked"
+      play = next.state === "playing"
+      voiceCall.tts(load || play ? 1 : 0)
+      voiceDebug.queue(next)
+      if (next.state === "playing" && !voiceCall.state.pending_user_turn) {
+        voiceCall.phase("assistant_speaking")
+      }
+      if (next.state === "idle" && voiceCall.state.active && input.status().type === "idle" && !voiceCall.state.pending_user_turn) {
+        voiceCall.phase("listening")
+      }
+      if (next.state === "error" && next.error) {
+        voiceCall.error(next.error)
+      }
+    },
+  })
+  const sense = () => Math.max(0.5, Math.min(2, input.cfg().stt.call_sensitivity))
+  const base = () => Math.max(0.001, input.cfg().stt.call_floor)
+  const bar = (peak: number, rms: number) => {
+    const boost = sense()
+    return Math.max(0.28, Math.min(1, peak * 220 * boost + rms * 140 * boost))
   }
 
   const clear = () => {
+    if (wait !== undefined) {
+      clearTimeout(wait)
+      wait = undefined
+    }
     if (beat !== undefined) {
       clearInterval(beat)
       beat = undefined
@@ -58,150 +86,42 @@ export function createSessionCall(input: {
       timer = undefined
     }
   }
-  const clearSync = () => {
-    if (sync === undefined) return
-    clearTimeout(sync)
-    sync = undefined
+
+  const note = (state: "idle" | "loading" | "playing" | "error", error?: string) => {
+    voiceCall.tts(load || play ? 1 : 0)
+    voiceDebug.queue({
+      state,
+      pending: load || play ? 1 : 0,
+      mode: "htmlaudio",
+      muted: input.mute(),
+      volume: gain(),
+      error,
+    })
   }
+
+  const sync = () => {
+    queue.update()
+  }
+
+  const stopAudio = () => {
+    rev += 1
+    play = false
+    load = false
+    queue.clear()
+  }
+
   const drop = () => {
     reset()
     voiceCall.vad("idle")
     void mic?.reset()
   }
 
-  const preset = () => input.cfg().tts.default_preset ?? input.cfg().tts.presets[0]?.id
-  const on = () => voiceCall.state.active && input.cfg().runtime.enabled
-  const bar = (peak: number, rms: number) => Math.max(0.28, Math.min(1, peak * 220 + rms * 140))
   const reset = () => {
-    floor = 0.004
+    floor = base()
     gate = 0
     quiet = 0
     vad = "idle"
     talk = false
-  }
-  const push = (msg: string, text: string, done = false) => {
-    next = { msg, text, done }
-    if (done) {
-      clearSync()
-      voiceCall.assistant(text)
-      ctrl?.sync(next)
-      return
-    }
-    if (sync !== undefined) return
-    sync = setTimeout(() => {
-      sync = undefined
-      if (!next.msg) return
-      voiceCall.assistant(next.text)
-      ctrl?.sync(next)
-    }, 120)
-  }
-
-  let ctrl: ReturnType<typeof createVoiceCtrl> | undefined
-  const queue = createAudioQueue({
-    // The settings preview is stable because it goes through the browser media
-    // element path. The progressive chat/call queue should follow the same
-    // playback backend on Tauri/WebView2 instead of WebAudio.
-    prefer: "htmlaudio",
-    muted: input.mute,
-    volume: input.volume,
-    note: (state: AudioQueueState) => {
-      voiceCall.tts(state.pending)
-      voiceDebug.queue({
-        state: state.state,
-        pending: state.pending,
-        mode: state.mode,
-        muted: state.muted,
-        volume: state.volume,
-        error: state.error,
-      })
-      ctrl?.tick()
-      if (!voiceCall.state.active) return
-      if (state.state === "playing" || state.state === "loading") {
-        if (!voiceCall.state.pending_user_turn) voiceCall.phase("assistant_speaking")
-        return
-      }
-      if (state.state === "error") {
-        voiceCall.error(state.error || "Audio playback failed.")
-        return
-      }
-      if (state.state !== "idle") return
-      if (input.status().type !== "idle") {
-        voiceCall.phase("assistant_thinking")
-        return
-      }
-      if (!voiceCall.state.pending_user_turn) voiceCall.phase("listening")
-    },
-  })
-
-  const speak = (text: string, meta: { seq: number; rank: number; effort: number }) =>
-    input.globalSDK.client.global.voice
-      .synthesize({
-        voiceSynthesizeInput: voiceInput({
-          config: input.cfg(),
-          text,
-          preset: preset(),
-          profile: "call",
-          rank: meta.rank,
-          num_step: step(text, input.cfg().tts.call_num_step, meta.effort, 8, 14),
-        }),
-      })
-      .then((res) => {
-        bad = false
-        voiceDebug.tts({
-          state: res.data?.audio ? "ready" : "empty",
-          duration_ms: res.data?.duration_ms,
-          preset: preset(),
-          text,
-          error: undefined,
-        })
-        return res.data?.audio
-      })
-
-  ctrl = createVoiceCtrl({
-    enabled: on,
-    strip: () => input.cfg().tts.call_strip_markdown,
-    chunk: "clause",
-    width: 1,
-    ahead: 1,
-    queue,
-    synth: speak,
-    note: (error) => {
-      if (bad) return
-      bad = true
-      const message = formatServerError(error, undefined, "Voice request failed")
-      voiceDebug.tts({
-        state: "error",
-        preset: preset(),
-        error: message,
-      })
-      voiceCall.error(message)
-      showToast({ title: "Call voice failed", description: message })
-    },
-    event: (event) => {
-      if (event.type === "start") {
-        voiceDebug.tts({
-          state: "running",
-          preset: preset(),
-          text: event.text,
-          error: undefined,
-        })
-        return
-      }
-      if (event.type === "queue") {
-        voiceCall.phase("assistant_speaking")
-        return
-      }
-    },
-  })
-
-  const pulse = () => {
-    const state = queue.state()
-    if (state.state !== "playing" && state.state !== "loading") {
-      voiceCall.assistantWave(0)
-      return
-    }
-    const value = 0.22 + Math.abs(Math.sin(Date.now() / 110)) * 0.68
-    voiceCall.assistantWave(value)
   }
 
   const fail = (error: unknown, fallback = "Voice request failed") => {
@@ -209,6 +129,73 @@ export function createSessionCall(input: {
     voiceCall.error(message)
     showToast({ title: "Call failed", description: message })
     return message
+  }
+
+  const speak = (msg?: string, text?: string) => {
+    if (wait !== undefined) {
+      clearTimeout(wait)
+      wait = undefined
+    }
+    if (!on() || !msg || !text?.trim()) return
+    if (mute && mute === msg) return
+    const key = `${msg}\n${text}`
+    if (done === key) return
+    wait = setTimeout(async () => {
+      const turn = rev
+      wait = undefined
+      if (turn !== rev || !on()) return
+      if (input.msg() !== msg || input.status().type !== "idle") return
+      load = true
+      play = false
+      voiceDebug.tts({
+        state: "running",
+        preset: preset(),
+        text,
+        error: undefined,
+      })
+      note("loading")
+      const res = await input.globalSDK.client.global.voice
+        .synthesize({
+          voiceSynthesizeInput: voiceInput({
+            config: input.cfg(),
+            text,
+            preset: preset(),
+            profile: "call",
+          }),
+        })
+        .catch((error) => {
+          if (turn !== rev || bad) return
+          bad = true
+          load = false
+          const message = formatServerError(error, undefined, "Voice request failed")
+          voiceDebug.tts({
+            state: "error",
+            preset: preset(),
+            error: message,
+          })
+          note("error", message)
+          voiceCall.error(message)
+          showToast({ title: "Call voice failed", description: message })
+        })
+      if (turn !== rev || !res?.data || input.msg() !== msg) return
+      const src = res.data.audio ?? ""
+      voiceDebug.tts({
+        state: src ? "ready" : "empty",
+        duration_ms: res.data.duration_ms,
+        preset: preset(),
+        text,
+        error: undefined,
+      })
+      if (!src) {
+        load = false
+        note("idle")
+        return
+      }
+      bad = false
+      done = key
+      queue.clear()
+      queue.enqueue(src)
+    }, 0)
   }
 
   const finish = async () => {
@@ -256,6 +243,7 @@ export function createSessionCall(input: {
           return
         }
         voiceCall.user(text)
+        voiceCall.assistant("")
         voiceCall.phase("assistant_thinking")
         const ok = await input.send(text)
         if (ok === false) voiceCall.phase("listening")
@@ -277,45 +265,38 @@ export function createSessionCall(input: {
     if (!voiceCall.state.active || voiceCall.state.interrupting) return
     voiceCall.interrupt(true)
     voiceCall.phase("interrupted")
-    ctrl.stop()
-    queue.clear()
+    stopAudio()
     voiceCall.assistant("")
     await input.abort().catch(() => undefined)
     voiceCall.interrupt(false)
     voiceCall.phase("listening")
   }
 
-  const frame = (input2: { peak: number; rms: number; chunk_ms: number }) => {
-    const playing = queue.state().state === "playing" || queue.state().state === "loading"
-    if (playing) {
+  const frame = (next: { peak: number; rms: number; chunk_ms: number }) => {
+    voiceCall.userWave(bar(next.peak, next.rms))
+    if (play || load) {
       if (vad !== "idle") {
         vad = "idle"
         voiceCall.vad("idle")
       }
       return
     }
-    const value = Math.max(input2.rms, input2.peak * 0.7)
-    voiceCall.userWave(bar(input2.peak, input2.rms))
-    if (!voiceCall.state.active) return
-    if (busy) return
-    if (!talk && value < floor * 1.5) floor = floor * 0.995 + value * 0.005
-    const limit = Math.max(0.009, floor * 2.2)
-    const trigger = 90
+    if (!voiceCall.state.active || busy) return
+    const value = Math.max(next.rms, next.peak * 0.7)
+    if (!talk && value < floor * 1.5) floor = Math.max(base(), floor * 0.995 + value * 0.005)
+    const limit = Math.max(base() * 1.15, floor * (2.2 / sense()))
     const hit = value > limit
     if (hit) {
-      gate += input2.chunk_ms
+      gate += next.chunk_ms
       quiet = 0
       if (vad !== "speech") {
         vad = "speech"
         voiceCall.vad("speech")
       }
-      if (!talk && gate >= trigger) {
+      if (!talk && gate >= 40) {
         talk = true
         voiceCall.phase("user_speaking")
-        if (
-          input.cfg().tts.call_stop_on_interrupt &&
-          (input.status().type !== "idle" || queue.state().state === "playing" || queue.state().state === "loading")
-        ) {
+        if (input.cfg().tts.call_stop_on_interrupt && (input.status().type !== "idle" || play || load)) {
           void interrupt()
         }
       }
@@ -329,7 +310,7 @@ export function createSessionCall(input: {
       }
       return
     }
-    quiet += input2.chunk_ms
+    quiet += next.chunk_ms
     if (quiet >= input.cfg().stt.long_pause_ms) {
       if (vad !== "long") {
         vad = "long"
@@ -351,20 +332,28 @@ export function createSessionCall(input: {
         vad = "short"
         voiceCall.vad("short")
       }
+    }
+  }
+
+  const pulse = () => {
+    if (!play && !load) {
+      voiceCall.assistantWave(0)
       return
     }
+    const next = 0.22 + Math.abs(Math.sin(Date.now() / 110)) * 0.68
+    voiceCall.assistantWave(next)
   }
 
   const stop = async () => {
     clear()
-    clearSync()
     seed = ""
+    done = ""
+    busy = false
     const rec = mic
     mic = undefined
     await input.abort().catch(() => undefined)
     await rec?.cancel().catch(() => undefined)
-    ctrl.stop()
-    queue.clear()
+    stopAudio()
     reset()
     voiceCall.reset()
     voiceDebug.stt({
@@ -390,8 +379,7 @@ export function createSessionCall(input: {
       showToast({ title: "Voice disabled", description: "Enable local voice in Settings > Voice." })
       return
     }
-    ctrl?.stop()
-    queue.clear()
+    stopAudio()
     reset()
     voiceCall.user("")
     voiceCall.assistant("")
@@ -401,7 +389,7 @@ export function createSessionCall(input: {
     const ready = await input.globalSDK.client.global.voice
       .ensure({
         voiceEnsureInput: {
-          target: "stt",
+          target: "all",
           preload: true,
         },
       })
@@ -420,11 +408,8 @@ export function createSessionCall(input: {
       onFrame: frame,
       max_ms: 30_000,
       capture: () => {
-        if (talk || busy || voiceCall.state.pending_user_turn) return true
-        const state = queue.state().state
-        const playing = state === "playing" || state === "loading"
-        if (!playing && input.status().type === "idle") return true
-        return false
+        if (busy || voiceCall.state.pending_user_turn) return true
+        return talk || gate > 0
       },
     }).catch((error) => {
       fail(error, "Microphone capture could not start")
@@ -435,6 +420,7 @@ export function createSessionCall(input: {
       return
     }
     mic = rec
+    sync()
     reset()
     at = Date.now()
     voiceCall.phase("listening")
@@ -450,7 +436,7 @@ export function createSessionCall(input: {
   createEffect(() => {
     input.mute()
     input.volume()
-    ctrl.update()
+    sync()
   })
 
   createEffect(() => {
@@ -459,24 +445,38 @@ export function createSessionCall(input: {
     if (!msg) return
     if (seed && msg === seed && input.status().type === "idle") return
     if (seed && msg !== seed) seed = ""
+    if (input.status().type !== "idle") {
+      if (!voiceCall.state.pending_user_turn && !play && !load) voiceCall.phase("assistant_thinking")
+      return
+    }
     const text = joinVoiceText(input.parts())
-    push(msg, text)
+    voiceCall.assistant(text)
+    if (mute && mute === msg) return
+    speak(msg, text)
+  })
+
+  createEffect((prev) => {
+    const next = input.msg()
+    if (!prev && next) {
+      mute = next
+      return next
+    }
+    if (prev && prev !== next) {
+      done = ""
+      stopAudio()
+    }
+    if (next && next !== mute) mute = ""
+    return next
   })
 
   createEffect((prev) => {
     const next = input.status().type
     if (!voiceCall.state.active) return next
     if (prev === "idle" && next !== "idle") drop()
-    if (prev !== "idle" && next === "idle") {
-      clearSync()
-      const msg = input.msg()
-      if (msg) ctrl.sync({ msg, text: joinVoiceText(input.parts()), done: true })
-      ctrl.flush()
-    }
-    if (next !== "idle" && !voiceCall.state.pending_user_turn && queue.state().state === "idle") {
+    if (next !== "idle" && !voiceCall.state.pending_user_turn && !play && !load) {
       voiceCall.phase("assistant_thinking")
     }
-    if (next === "idle" && queue.state().state === "idle" && !voiceCall.state.pending_user_turn) {
+    if (next === "idle" && !voiceCall.state.pending_user_turn && !play && !load) {
       voiceCall.phase("listening")
     }
     return next
@@ -492,10 +492,9 @@ export function createSessionCall(input: {
     const next = input.turn()
     if (!voiceCall.state.active) return next
     if (prev && next && prev !== next && input.cfg().tts.call_stop_on_interrupt) {
-      clearSync()
       seed = ""
-      ctrl.stop()
-      queue.clear()
+      done = ""
+      stopAudio()
       voiceCall.assistant("")
     }
     return next

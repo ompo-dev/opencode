@@ -369,7 +369,14 @@ export function MessageTimeline(props: {
     const last = sessionMessages().find(
       (item): item is AssistantMessage => item.role === "assistant" && item.id === prev.id,
     )
-    if (!last) return
+    if (!last) {
+      const tail = sessionMessages().findLast((item): item is AssistantMessage => item.role === "assistant")
+      if (!tail) return
+      return {
+        id: tail.id,
+        parts: sync.data.part[tail.id] ?? [],
+      }
+    }
     return {
       id: last.id,
       parts: sync.data.part[last.id] ?? [],
