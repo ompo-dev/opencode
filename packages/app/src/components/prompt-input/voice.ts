@@ -13,6 +13,9 @@ type Recorder = {
 type Stream = {
   stop: () => Promise<void>
   cancel: () => Promise<void>
+  reset: () => void
+  pause: () => Promise<void>
+  resume: () => Promise<void>
   snapshot: () => Promise<{ audio: string; duration_ms: number; peak: number } | undefined>
   cut: () => Promise<{ audio: string; duration_ms: number; peak: number } | undefined>
 }
@@ -176,6 +179,8 @@ function encodeClip(input: { list: Float32Array[]; rate: number; peak: number })
 export async function startVoiceStream(input?: {
   device?: string
   onFrame?: (input: { peak: number; rms: number; duration_ms: number; chunk_ms: number }) => void
+  max_ms?: number
+  capture?: () => boolean
 }): Promise<Stream> {
   const media = navigator.mediaDevices
   if (!media?.getUserMedia) throw new Error("Microphone capture is unavailable")
@@ -191,25 +196,53 @@ export async function startVoiceStream(input?: {
   let size = 0
   let peak = 0
   let closed = false
+  let paused = false
+  const cap = input?.max_ms ? Math.max(0, Math.round((input.max_ms / 1000) * ctx.sampleRate)) : 0
+
+  const syncPeak = () => {
+    peak = 0
+    for (const item of list) {
+      for (let idx = 0; idx < item.length; idx += 1) {
+        peak = Math.max(peak, Math.abs(item[idx] ?? 0))
+      }
+    }
+  }
+
+  const trim = () => {
+    if (!cap) return
+    let cut = false
+    while (size > cap && list.length > 0) {
+      const item = list.shift()
+      if (!item) break
+      size -= item.length
+      cut = true
+    }
+    if (cut) syncPeak()
+  }
 
   gain.gain.value = 0
   node.onaudioprocess = (event) => {
-    const data = new Float32Array(event.inputBuffer.getChannelData(0))
-    list.push(data)
-    size += data.length
+    const raw = event.inputBuffer.getChannelData(0)
     let rms = 0
     let top = 0
-    for (let idx = 0; idx < data.length; idx += 1) {
-      const value = Math.abs(data[idx] ?? 0)
+    for (let idx = 0; idx < raw.length; idx += 1) {
+      const value = Math.abs(raw[idx] ?? 0)
       top = Math.max(top, value)
       rms += value * value
     }
-    peak = Math.max(peak, top)
+    const keep = input?.capture ? input.capture() : true
+    if (keep) {
+      const data = new Float32Array(raw)
+      list.push(data)
+      size += data.length
+      peak = Math.max(peak, top)
+      trim()
+    }
     input?.onFrame?.({
       peak: top,
-      rms: Math.sqrt(rms / Math.max(1, data.length)),
+      rms: Math.sqrt(rms / Math.max(1, raw.length)),
       duration_ms: Math.round((size / ctx.sampleRate) * 1000),
-      chunk_ms: Math.round((data.length / ctx.sampleRate) * 1000),
+      chunk_ms: Math.round((raw.length / ctx.sampleRate) * 1000),
     })
   }
 
@@ -242,6 +275,19 @@ export async function startVoiceStream(input?: {
     async cancel() {
       clear()
       await shutdown()
+    },
+    async reset() {
+      clear()
+    },
+    async pause() {
+      if (closed || paused) return
+      paused = true
+      await ctx.suspend().catch(() => undefined)
+    },
+    async resume() {
+      if (closed || !paused) return
+      paused = false
+      await ctx.resume().catch(() => undefined)
     },
     async snapshot() {
       return encodeClip({

@@ -33,12 +33,10 @@ function Wave(props: { items: number[]; tone: "user" | "assistant" }) {
           <div
             class="min-w-0 flex-1 rounded-full transition-all"
             style={{
-              height: `${Math.max(12, Math.round(16 + item() * 32))}px`,
+              height: `${Math.max(16, Math.round(20 + item() * 34))}px`,
               "background-color":
-                props.tone === "user"
-                  ? "var(--icon-success-base)"
-                  : "color-mix(in oklab, var(--icon-warning-base) 88%, white 12%)",
-              opacity: `${props.tone === "user" ? 0.82 + item() * 0.18 : 0.2 + item() * 0.8}`,
+                props.tone === "user" ? "var(--icon-success-base)" : "var(--icon-warning-base)",
+              opacity: `${props.tone === "user" ? 0.32 + item() * 0.68 : 0.24 + item() * 0.76}`,
             }}
           />
         )}

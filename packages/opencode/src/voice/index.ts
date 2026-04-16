@@ -44,7 +44,7 @@ const install = {
   whisperx: "3.8.5",
   omnivoice: "0.1.4",
 }
-const span = 2
+const span = 1
 const win = {
   url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
 }
@@ -162,6 +162,56 @@ function needRefText(input: z.infer<typeof SynthesizeInput>) {
   return !!input.ref_audio_path
 }
 
+function clip(input?: string, size = 96) {
+  const text = input?.replace(/\s+/g, " ").trim()
+  if (!text) return
+  if (text.length <= size) return text
+  return text.slice(0, size) + "…"
+}
+
+function ref(input?: string) {
+  if (!input) return
+  return path.basename(input)
+}
+
+function reqMeta(input: Omit<VoiceWorkerReq, "id">) {
+  const body = input.input
+  if (input.cmd === "status") return {}
+  if ("stt" in body || "tts" in body || "clone" in body) {
+    return {
+      stt: "stt" in body ? body.stt : undefined,
+      tts: "tts" in body ? body.tts : undefined,
+      mode: "clone" in body ? body.clone?.mode : undefined,
+      ref: "clone" in body ? ref(body.clone?.ref_audio_path) : undefined,
+      ref_text_len: "clone" in body ? body.clone?.ref_text?.length : undefined,
+    }
+  }
+  if ("path" in body) {
+    return {
+      profile: "profile" in body ? body.profile : undefined,
+      partial: "partial" in body ? body.partial : undefined,
+      language: "language" in body ? body.language : undefined,
+      diarization: "diarization" in body ? body.diarization : undefined,
+      file: ref(body.path),
+    }
+  }
+  return {
+    profile: "profile" in body ? body.profile : undefined,
+    rank: "rank" in body ? body.rank : undefined,
+    preset: "preset" in body ? body.preset : undefined,
+    mode: "mode" in body ? body.mode : undefined,
+    language: "language" in body ? body.language : undefined,
+    speed: "speed" in body ? body.speed : undefined,
+    duration: "duration" in body ? body.duration : undefined,
+    num_step: "num_step" in body ? body.num_step : undefined,
+    ref: "ref_audio_path" in body ? ref(body.ref_audio_path) : undefined,
+    ref_text_len: "ref_text" in body ? body.ref_text?.length : undefined,
+    instruct_len: "instruct" in body ? body.instruct?.length : undefined,
+    text_len: "text" in body ? body.text.length : undefined,
+    text_head: "text" in body ? clip(body.text) : undefined,
+  }
+}
+
 export namespace Voice {
   const log = Log.create({ service: "voice" })
 
@@ -172,6 +222,9 @@ type State = {
   bin: Bin
   workers: Partial<Record<Kind, Worker>>
   tts: Worker[]
+  idle: Partial<Record<Kind, ReturnType<typeof setTimeout>>>
+  hold: Record<Kind, number>
+  stick: Record<Kind, boolean>
   active?: Kind
   task?: Task
   ensure?: Promise<void>
@@ -185,8 +238,18 @@ type State = {
     bin: {},
     workers: {},
     tts: [],
+    idle: {},
+    hold: {
+      stt: 0,
+      tts: 0,
+    },
+    stick: {
+      stt: false,
+      tts: false,
+    },
     queue: Promise.resolve(),
   }
+  let hooked = false
 
   export const Updated = BusEvent.define("voice.updated", Status)
 
@@ -277,6 +340,69 @@ type State = {
     await emit()
   }
 
+  function clearIdle(kind?: Kind) {
+    if (kind) {
+      const timer = state.idle[kind]
+      if (timer !== undefined) clearTimeout(timer)
+      state.idle[kind] = undefined
+      return
+    }
+    clearIdle("stt")
+    clearIdle("tts")
+  }
+
+  function hold(kind: Kind, ms: number) {
+    state.hold[kind] = Math.max(state.hold[kind], Date.now() + ms)
+  }
+
+  function resetHold(kind: Kind, ms: number) {
+    state.hold[kind] = Date.now() + ms
+  }
+
+  function holdBoth(ms: number) {
+    hold("stt", ms)
+    hold("tts", ms)
+  }
+
+  function pin(kind: Kind) {
+    state.stick[kind] = true
+    clearIdle(kind)
+  }
+
+  function idleMs(kind: Kind, ms?: number) {
+    const base = ms ?? (kind === "tts" ? 90_000 : 120_000)
+    const wait = state.hold[kind] - Date.now()
+    return Math.max(base, wait > 0 ? wait : 0)
+  }
+
+  function armIdle(kind: Kind, ms?: number) {
+    if (state.stick[kind]) {
+      clearIdle(kind)
+      log.info("voice idle skipped", {
+        kind,
+        sticky: true,
+      })
+      return
+    }
+    clearIdle(kind)
+    state.idle[kind] = setTimeout(() => {
+      if (state.hold[kind] > Date.now()) {
+        armIdle(kind, ms)
+        return
+      }
+      state.idle[kind] = undefined
+      void stop(kind)
+        .then(async () => {
+          const hit = kind === "tts" ? state.tts.length > 0 : !!state.workers[kind]
+          await set(hit || Object.values(state.workers).some(Boolean) ? "ready" : "idle", {
+            device: state.device,
+            err: undefined,
+          })
+        })
+        .catch(() => undefined)
+    }, idleMs(kind, ms))
+  }
+
   async function dirs(next: PathInfo) {
     await Promise.all([
       fs.mkdir(next.root, { recursive: true }),
@@ -291,6 +417,39 @@ type State = {
 
   async function json(file: string) {
     return Filesystem.readJson(file).catch(() => undefined)
+  }
+
+  function safe(input: string) {
+    return input.replaceAll("'", "''")
+  }
+
+  function hook() {
+    if (hooked) return
+    hooked = true
+    const cut = () => {
+      const list = [...state.tts, state.workers.stt].filter((item): item is Worker => !!item)
+      void Promise.all(list.map((item) => Process.stop(item.proc).catch(() => undefined)))
+    }
+    process.once("beforeExit", cut)
+    process.once("SIGINT", cut)
+    process.once("SIGTERM", cut)
+  }
+
+  async function reap(next: PathInfo, kind: Kind) {
+    const py = envInfo(next, kind).python
+    if (process.platform === "win32") {
+      await Process.run(
+        [
+          "powershell",
+          "-NoProfile",
+          "-Command",
+          `$py='${safe(py)}'; Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -like "*$py*" -and $_.CommandLine -like '*worker.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`,
+        ],
+        { nothrow: true },
+      )
+      return
+    }
+    await Process.run(["pkill", "-f", py], { nothrow: true })
   }
 
   async function registry(next: PathInfo): Promise<Registry> {
@@ -479,6 +638,57 @@ function audioType(file: string) {
   return "application/octet-stream"
 }
 
+async function probeDuration(file: string) {
+  if (!state.bin.ffprobe) return
+  const out = await run(
+    [state.bin.ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file],
+    path.dirname(file),
+  ).catch(() => undefined)
+  const text = out?.stdout.toString().trim()
+  if (!text) return
+  const value = Number.parseFloat(text)
+  if (!Number.isFinite(value) || value <= 0) return
+  return value
+}
+
+async function fitRef(next: PathInfo, file?: string) {
+  if (!file || !state.bin.ffmpeg || !state.bin.ffprobe) return file
+  const duration = await probeDuration(file)
+  if (!duration || duration <= 10) return file
+  const stat = await fs.stat(file).catch(() => undefined)
+  if (!stat) return file
+  const parsed = path.parse(file)
+  const name = `${stem(parsed.name)}-${stat.size}-${Math.round(stat.mtimeMs)}-10s.wav`
+  const out = path.join(next.tmp, name)
+  if (!(await Filesystem.exists(out))) {
+    log.info("trimming voice reference", {
+      src: ref(file),
+      duration_ms: Math.round(duration * 1000),
+      out: ref(out),
+    })
+    await run(
+      [
+        state.bin.ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        file,
+        "-t",
+        "10",
+        "-ac",
+        "1",
+        "-ar",
+        "24000",
+        out,
+      ],
+      next.tmp,
+    )
+  }
+  return out
+}
+
   function procEnv(next: PathInfo, config: VoiceConfigResolved, kind: Kind) {
     const list = [next.ffmpeg_dir, process.env.PATH ?? process.env.Path ?? ""].filter(Boolean).join(path.delimiter)
     return {
@@ -523,6 +733,12 @@ function audioType(file: string) {
         stdout: "pipe",
         stderr: "pipe",
       })
+      log.info("voice worker spawned", {
+        kind,
+        pid: this.proc.pid,
+        model: this.model,
+        root: next.root,
+      })
 
       if (!this.proc.stdout || !this.proc.stdin || !this.proc.stderr) {
         throw new Error("Voice worker streams are unavailable")
@@ -557,6 +773,12 @@ function audioType(file: string) {
       })
 
       void this.proc.exited.then((code) => {
+        log.warn("voice worker exited", {
+          kind: this.kind,
+          pid: this.proc.pid,
+          code,
+          model: this.model,
+        })
         for (const [id, slot] of this.wait.entries()) {
           slot.err(new Error(`Voice worker exited with code ${code}`))
           this.wait.delete(id)
@@ -577,15 +799,52 @@ function audioType(file: string) {
       if (!this.proc.stdin) throw new Error("Voice worker stdin unavailable")
       const id = randomUUID()
       const req = Req.parse({ ...input, id })
+      const now = Date.now()
       const task = new Promise<unknown>((ok, err) => {
-        this.wait.set(id, { ok, err })
+        this.wait.set(id, {
+          ok: (value) => {
+            log.info("voice worker req ok", {
+              kind: this.kind,
+              pid: this.proc.pid,
+              id,
+              cmd: input.cmd,
+              duration: Date.now() - now,
+              ...reqMeta(input),
+            })
+            ok(value)
+          },
+          err: (error) => {
+            log.error("voice worker req err", {
+              kind: this.kind,
+              pid: this.proc.pid,
+              id,
+              cmd: input.cmd,
+              duration: Date.now() - now,
+              err: error,
+              ...reqMeta(input),
+            })
+            err(error)
+          },
+        })
       })
       state.active = this.kind
+      log.info("voice worker req", {
+        kind: this.kind,
+        pid: this.proc.pid,
+        id,
+        cmd: input.cmd,
+        ...reqMeta(input),
+      })
       this.proc.stdin.write(JSON.stringify(req) + "\n")
       return task
     }
 
     async stop() {
+      log.info("voice worker stop", {
+        kind: this.kind,
+        pid: this.proc.pid,
+        model: this.model,
+      })
       await Process.stop(this.proc)
     }
   }
@@ -602,21 +861,54 @@ function audioType(file: string) {
 
   async function warm(worker: Worker, config: VoiceConfigResolved) {
     if (worker.warmed) return
+    clearIdle(worker.kind)
+    const now = Date.now()
+    const preset =
+      worker.kind !== "tts"
+        ? undefined
+        : (() => {
+            const item = voicePreset(config)
+            if (!item?.ref_audio_path || item.mode === "design") return
+            return {
+              mode: item.mode,
+              ref_audio_path: item.ref_audio_path,
+              ref_text: item.ref_text,
+            }
+          })()
+    const clone =
+      worker.kind !== "tts" || !preset
+        ? undefined
+        : {
+            ...preset,
+            ref_audio_path: await fitRef(paths(), preset.ref_audio_path),
+          }
     const out = (await worker.req({
       cmd: "warm",
       input: {
         cfg: config,
         stt: worker.kind == "stt",
         tts: worker.kind == "tts",
+        clone,
       },
     })) as Probe
     worker.warmed = true
+    pin(worker.kind)
     worker.device = out.device
     apply(out, config)
+    armIdle(worker.kind)
+    log.info("voice warm ready", {
+      kind: worker.kind,
+      pid: worker.proc.pid,
+      duration: Date.now() - now,
+      device: worker.device,
+      clone: !!clone?.ref_audio_path,
+      ref: ref(clone?.ref_audio_path),
+    })
   }
 
   async function stop(kind?: Kind) {
     if (kind) {
+      clearIdle(kind)
       if (kind === "tts") {
         const prev = [...state.tts]
         state.tts = []
@@ -636,7 +928,14 @@ function audioType(file: string) {
 
   async function start(next: PathInfo, config: VoiceConfigResolved, kind: Kind, quiet = false) {
     if (!quiet) await set("starting")
+    log.info("voice start", {
+      kind,
+      model: kind === "stt" ? config.stt.model : omnivoice,
+    })
     await stop(kind)
+    clearIdle(kind)
+    hook()
+    await reap(next, kind)
     const file = await ensureWorker(next)
     const worker = new Worker(kind, next, config, file)
     state.workers[kind] = worker
@@ -648,10 +947,17 @@ function audioType(file: string) {
 
   async function pool(next: PathInfo, config: VoiceConfigResolved, count: number) {
     const need = Math.max(1, Math.min(span, count))
+    log.info("voice tts pool", {
+      need,
+      live: state.tts.length,
+      model: omnivoice,
+    })
     if (state.tts.some((item) => item.sig !== sig("tts", config))) {
       await stop("tts")
     }
+    hook()
     while (state.tts.length < need) {
+      await reap(next, "tts")
       const file = await ensureWorker(next)
       const worker = new Worker("tts", next, config, file)
       state.tts = [...state.tts, worker]
@@ -676,6 +982,10 @@ function audioType(file: string) {
       await state.ensure
       return
     }
+    log.info("voice ensure begin", {
+      target,
+      preload,
+    })
     const abort = new AbortController()
     state.abort = abort
     state.ensure = (async () => {
@@ -735,18 +1045,33 @@ function audioType(file: string) {
           await warm(worker, config)
           await mark(next, config.stt.model)
         }
+        armIdle(item)
       }
       await task({ target, stage: "ready", progress: 100 })
       await set("ready", { device: state.device })
+      log.info("voice ensure ready", {
+        target,
+        preload,
+        device: state.device,
+      })
     })()
       .catch(async (err) => {
         if (abort.signal.aborted || aborted(err)) {
+          log.warn("voice ensure cancelled", {
+            target,
+            preload,
+          })
           await set(Object.values(state.workers).some(Boolean) ? "ready" : "idle", {
             device: state.device,
             err: undefined,
           })
           return
         }
+        log.error("voice ensure failed", {
+          target,
+          preload,
+          err: err instanceof Error ? err : new Error(String(err)),
+        })
         await set("error", { err: err instanceof Error ? err.message : String(err) })
         throw err
       })
@@ -760,6 +1085,11 @@ function audioType(file: string) {
 
   async function ready(kind: Kind, preload = false, config?: VoiceConfigResolved) {
     const next = config ?? (await cfg())
+    log.info("voice ready check", {
+      kind,
+      preload,
+      model: kind === "stt" ? next.stt.model : omnivoice,
+    })
     if (!next.runtime.enabled) {
       await set("disabled")
       throw new Error("Voice runtime is disabled")
@@ -791,6 +1121,7 @@ function audioType(file: string) {
         await warm(worker, next)
         await mark(info, next.stt.model)
       }
+      armIdle(kind)
       await task()
     }
     return { config: next, paths: info, worker }
@@ -808,6 +1139,12 @@ function audioType(file: string) {
     }
     const slot = Math.max(0, Math.min(2, rank))
     const list = await pool(next, config, slot + 1)
+    log.info("voice select tts", {
+      slot,
+      rank,
+      live: list.length,
+      pid: list[Math.min(slot, list.length - 1)]?.proc.pid,
+    })
     return { worker: list[Math.min(slot, list.length - 1)] ?? list[0], paths: next }
   }
 
@@ -840,8 +1177,17 @@ function audioType(file: string) {
   }
 
   async function transcribeFile(file: string, config: VoiceConfigResolved, language?: string) {
+    const now = Date.now()
+    log.info("voice transcribe file begin", {
+      file: ref(file),
+      language,
+      model: config.stt.model,
+    })
     const { worker, paths: info } = await ready("stt", false, config)
-    const out = await worker.req({
+    resetHold("stt", 45_000)
+    hold("tts", 3 * 60 * 1000)
+    clearIdle("stt")
+    const raw = await worker.req({
       cmd: "transcribe",
       input: {
         cfg: config,
@@ -850,9 +1196,23 @@ function audioType(file: string) {
         diarization: false,
       },
     })
+    const out = TranscribeOutput.parse(raw)
     worker.warmed = true
+    pin("stt")
     await mark(info, config.stt.model)
-    return TranscribeOutput.parse(out)
+    armIdle("tts")
+    armIdle("stt", 45_000)
+    log.info("voice transcribe file done", {
+      file: ref(file),
+      duration: Date.now() - now,
+      text_len: out.text.length,
+      text_head: clip(out.text),
+      segments: out.segments.length,
+      words: out.words.length,
+      language: out.language,
+      pid: worker.proc.pid,
+    })
+    return out
   }
 
   export async function status() {
@@ -1020,14 +1380,29 @@ function audioType(file: string) {
   export async function transcribe(input: z.input<typeof TranscribeInput>) {
     const req = TranscribeInput.parse(input)
     return serial("stt", async () => {
+      const now = Date.now()
+      log.info("voice transcribe begin", {
+        profile: req.profile,
+        partial: req.partial,
+        language: req.language,
+        diarization: req.diarization,
+        audio_len: req.audio.length,
+      })
       const base = await cfg()
       const config = sttProfile(base, req)
       const next = paths()
       const { worker } = await ready("stt", false, config)
+      if (req.profile === "call") {
+        resetHold("stt", 2 * 60 * 1000)
+      } else {
+        resetHold("stt", 45_000)
+        hold("tts", 3 * 60 * 1000)
+      }
+      clearIdle("stt")
       const file = path.join(next.tmp, `${randomUUID()}.wav`)
       await Filesystem.write(file, decode(req.audio))
       try {
-        const out = await worker.req({
+        const raw = await worker.req({
           cmd: "transcribe",
           input: {
             cfg: config,
@@ -1038,9 +1413,27 @@ function audioType(file: string) {
             partial: req.partial,
           },
         })
+        const out = TranscribeOutput.parse(raw)
         worker.warmed = true
+        pin("stt")
         await mark(next, config.stt.model)
-        return TranscribeOutput.parse(out)
+        if (req.profile === "call") {
+          armIdle("stt", 2 * 60 * 1000)
+        } else {
+          armIdle("tts")
+          armIdle("stt", 45_000)
+        }
+        log.info("voice transcribe done", {
+          profile: req.profile,
+          duration: Date.now() - now,
+          pid: worker.proc.pid,
+          text_len: out.text.length,
+          text_head: clip(out.text),
+          segments: out.segments.length,
+          words: out.words.length,
+          language: out.language,
+        })
+        return out
       } finally {
         await fs.unlink(file).catch(() => undefined)
       }
@@ -1050,6 +1443,29 @@ function audioType(file: string) {
   export async function synthesize(input: z.input<typeof SynthesizeInput>) {
     const config = await cfg()
     let req = resolveSynth(config, input)
+    const now = Date.now()
+    log.info("voice synth begin", {
+      profile: req.profile,
+      rank: req.rank,
+      preset: req.preset,
+      mode: req.mode,
+      language: req.language,
+      speed: req.speed,
+      duration: req.duration,
+      num_step: req.num_step,
+      ref: ref(req.ref_audio_path),
+      ref_text_len: req.ref_text?.length,
+      instruct_len: req.instruct?.length,
+      text_len: req.text.length,
+      text_head: clip(req.text),
+    })
+    const { worker, paths: info } = await selectTts(config, req.rank ?? 0)
+    if (req.ref_audio_path) {
+      req = SynthesizeInput.parse({
+        ...req,
+        ref_audio_path: await fitRef(info, req.ref_audio_path),
+      })
+    }
     if (needRefText(req) && req.ref_audio_path) {
       const ref = await transcribeFile(req.ref_audio_path, config, req.language)
       req = SynthesizeInput.parse({
@@ -1057,8 +1473,14 @@ function audioType(file: string) {
         ref_text: ref.text,
       })
     }
-    const { worker } = await selectTts(config, req.rank ?? 0)
-    const out = await worker.req({
+    if (req.profile === "call") {
+      resetHold("tts", 90_000)
+    } else {
+      hold("tts", state.workers.stt ? 3 * 60 * 1000 : 90_000)
+      if (state.workers.stt) resetHold("stt", 5_000)
+    }
+    clearIdle("tts")
+    const raw = await worker.req({
       cmd: "synthesize",
       input: {
         cfg: config,
@@ -1077,8 +1499,24 @@ function audioType(file: string) {
         num_step: req.num_step,
       },
     })
+    const out = SynthesizeOutput.parse(raw)
     worker.warmed = true
-    return SynthesizeOutput.parse(out)
+    pin("tts")
+    armIdle("tts", req.profile === "call" ? 90_000 : undefined)
+    if (state.workers.stt) armIdle("stt", 5_000)
+    log.info("voice synth done", {
+      profile: req.profile,
+      rank: req.rank,
+      mode: req.mode,
+      duration: Date.now() - now,
+      pid: worker.proc.pid,
+      audio_ms: out.duration_ms,
+      sample_rate: out.sample_rate,
+      text_used_len: out.text_used.length,
+      text_used_head: clip(out.text_used),
+      ref: ref(req.ref_audio_path),
+    })
+    return out
   }
 }
 

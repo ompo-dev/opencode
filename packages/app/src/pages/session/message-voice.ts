@@ -10,6 +10,11 @@ import { type VoiceConfigResolved, voiceInput } from "@opencode-ai/voice"
 const speakable = (part: Part): part is TextPart => part.type === "text" && !part.synthetic && !part.ignored
 type AudioQueue = Pick<ReturnType<typeof createAudioQueue>, "enqueue" | "clear" | "update" | "state">
 
+const step = (text: string, base: number, effort: number, low: number, high: number) => {
+  const cap = text.trim().length <= 12 ? low + 2 : text.trim().length <= 32 ? high - 2 : high
+  return Math.max(low, Math.min(cap, Math.round(base * effort)))
+}
+
 export function joinVoiceText(parts: Part[]) {
   return parts
     .filter(speakable)
@@ -200,123 +205,108 @@ export function createMessageVoice(input: {
   enabled?: Accessor<boolean>
 }) {
   let bad = false
-  let live = ""
-  let busy = ""
   let done = ""
   let mute = ""
-  let warm = ""
   let wait: ReturnType<typeof setTimeout> | undefined
-  let sync: ReturnType<typeof setTimeout> | undefined
-  let next = {
-    msg: "",
-    text: "",
-    done: false,
-  }
+  let rev = 0
+  let audio: HTMLAudioElement | undefined
   const preset = () => input.cfg().tts.default_preset ?? input.cfg().tts.presets[0]?.id
-  let ctrl: ReturnType<typeof createVoiceCtrl> | undefined
-  const queue = createAudioQueue({
-    prefer: "htmlaudio",
-    muted: input.mute,
-    volume: input.volume,
-    note: (state: AudioQueueState) => {
-      voiceDebug.queue({
-        state: state.state,
-        pending: state.pending,
-        mode: state.mode,
-        muted: state.muted,
-        volume: state.volume,
-        error: state.error,
-      })
-      ctrl?.tick()
-    },
-  })
+  const gain = () => Math.max(0, Math.min(1, input.volume()))
   const clear = () => {
     if (wait === undefined) return
     clearTimeout(wait)
     wait = undefined
   }
-  const clearSync = () => {
-    if (sync === undefined) return
-    clearTimeout(sync)
-    sync = undefined
-  }
-  const push = (msg: string, text: string, done = false) => {
-    next = { msg, text, done }
-    if (done) {
-      clearSync()
-      ctrl?.sync(next)
-      return
-    }
-    if (sync !== undefined) return
-    sync = setTimeout(() => {
-      sync = undefined
-      if (!next.msg) return
-      ctrl?.sync(next)
-    }, 220)
-  }
   const enabled = () => (input.enabled ? input.enabled() : true) && input.cfg().runtime.enabled && input.cfg().tts.autoplay
-  const liveEnabled = () => enabled() && input.cfg().tts.live
-  const speak = (text: string, meta: { seq: number; rank: number; effort: number }) =>
-    input.globalSDK.client.global.voice
-      .synthesize({
-        voiceSynthesizeInput: voiceInput({
-          config: input.cfg(),
-          text,
-          preset: preset(),
-          rank: meta.rank,
-          num_step: Math.max(8, Math.round(input.cfg().tts.num_step * meta.effort)),
-        }),
+
+  const init = () => {
+    if (audio || typeof Audio === "undefined") return
+    audio =
+      typeof document === "undefined"
+        ? new Audio()
+        : Object.assign(document.createElement("audio"), {
+            preload: "metadata",
+            style: "display:none",
+          })
+    if (typeof document !== "undefined") document.body.append(audio)
+    audio.onplay = () => {
+      voiceDebug.queue({
+        state: "playing",
+        pending: 1,
+        mode: "htmlaudio",
+        muted: input.mute(),
+        volume: gain(),
+        error: undefined,
       })
-      .then((res) => {
-        bad = false
-        voiceDebug.tts({
-          state: res.data?.audio ? "ready" : "empty",
-          duration_ms: res.data?.duration_ms,
-          preset: preset(),
-          text,
-          error: undefined,
-        })
-        return res.data?.audio
+    }
+    audio.onpause = () => {
+      if (!audio?.src) return
+      voiceDebug.queue({
+        state: "idle",
+        pending: 0,
+        mode: "htmlaudio",
+        muted: input.mute(),
+        volume: gain(),
+        error: undefined,
       })
-  ctrl = createVoiceCtrl({
-    enabled: liveEnabled,
-    strip: () => input.cfg().tts.strip_markdown,
-    chunk: "clause",
-    width: 1,
-    ahead: 2,
-    queue,
-    synth: speak,
-    note: (error) => {
-      busy = ""
-      if (bad) return
-      bad = true
-      const message = formatServerError(error, undefined, "Voice request failed")
-      voiceDebug.tts({
+    }
+    audio.onended = () => {
+      if (audio) audio.currentTime = 0
+      voiceDebug.queue({
+        state: "idle",
+        pending: 0,
+        mode: "htmlaudio",
+        muted: input.mute(),
+        volume: gain(),
+        error: undefined,
+      })
+    }
+    audio.onerror = () => {
+      voiceDebug.queue({
         state: "error",
-        preset: preset(),
-        error: message,
+        pending: 0,
+        mode: "htmlaudio",
+        muted: input.mute(),
+        volume: gain(),
+        error: "Audio playback failed.",
       })
-      showToast({ title: "Voice failed", description: message })
-    },
-    event: (event) => {
-      if (event.type === "start") {
-        busy = event.msg
-        voiceDebug.tts({
-          state: "running",
-          preset: preset(),
-          text: event.text,
-          error: undefined,
-        })
-        return
-      }
-      if (event.type === "queue") {
-        busy = ""
-        live = event.msg
-        return
-      }
-      if (busy === event.msg) busy = ""
-    },
-  })
+    }
+  }
+
+  const sync = () => {
+    init()
+    if (!audio) return
+    audio.muted = input.mute()
+    audio.volume = input.mute() ? 0 : gain()
+    voiceDebug.queue({
+      state: audio.paused ? "idle" : "playing",
+      pending: audio.src ? 1 : 0,
+      mode: "htmlaudio",
+      muted: input.mute(),
+      volume: gain(),
+      error: undefined,
+    })
+  }
+
+  const reset = () => {
+    rev += 1
+    clear()
+    if (audio) {
+      audio.pause()
+      audio.currentTime = 0
+      audio.removeAttribute("src")
+      audio.src = ""
+      if (typeof audio.load === "function") audio.load()
+    }
+    voiceDebug.queue({
+      state: "idle",
+      pending: 0,
+      mode: "htmlaudio",
+      muted: input.mute(),
+      volume: gain(),
+      error: undefined,
+    })
+  }
 
   const plan = (msg?: string, text?: string) => {
     clear()
@@ -325,40 +315,100 @@ export function createMessageVoice(input: {
     const key = `${msg}\n${text}`
     if (done === key) return
     wait = setTimeout(async () => {
+      const turn = rev
       wait = undefined
-      if (!enabled()) return
-      if (input.msg() !== msg) return
-      if (input.status().type !== "idle") return
-      if (liveEnabled() && live === msg) return
-      if (liveEnabled() && busy === msg) {
-        plan(msg, text)
-        return
-      }
+      if (turn !== rev || !enabled()) return
+      if (input.msg() !== msg || input.status().type !== "idle") return
       voiceDebug.tts({
         state: "running",
         preset: preset(),
         text,
         error: undefined,
       })
-      const audio = await speak(text, {
-        seq: 0,
-        rank: 0,
-        effort: 1,
-      }).catch((error) => {
-        ctrl.stop()
-        throw error
+      voiceDebug.queue({
+        state: "loading",
+        pending: 1,
+        mode: "htmlaudio",
+        muted: input.mute(),
+        volume: gain(),
+        error: undefined,
       })
-      if (!audio) return
-      if (input.msg() !== msg) return
+      const res = await input.globalSDK.client.global.voice
+        .synthesize({
+          voiceSynthesizeInput: voiceInput({
+            config: input.cfg(),
+            text,
+            preset: preset(),
+          }),
+        })
+        .catch((error) => {
+          if (turn !== rev || bad) return
+          bad = true
+          const message = formatServerError(error, undefined, "Voice request failed")
+          voiceDebug.tts({
+            state: "error",
+            preset: preset(),
+            error: message,
+          })
+          voiceDebug.queue({
+            state: "error",
+            pending: 0,
+            mode: "htmlaudio",
+            muted: input.mute(),
+            volume: gain(),
+            error: message,
+          })
+          showToast({ title: "Voice failed", description: message })
+        })
+      if (turn !== rev || !res?.data || input.msg() !== msg) return
+      const src = res.data.audio ?? ""
+      voiceDebug.tts({
+        state: src ? "ready" : "empty",
+        duration_ms: res.data.duration_ms,
+        preset: preset(),
+        text,
+        error: undefined,
+      })
+      if (!src) {
+        voiceDebug.queue({
+          state: "idle",
+          pending: 0,
+          mode: "htmlaudio",
+          muted: input.mute(),
+          volume: gain(),
+          error: undefined,
+        })
+        return
+      }
+      bad = false
       done = key
-      queue.enqueue(audio)
-    }, liveEnabled() ? 900 : 0)
+      init()
+      if (!audio) return
+      audio.pause()
+      audio.currentTime = 0
+      audio.src = src
+      sync()
+      await audio.play().catch((error) => {
+        if (turn !== rev || bad) return
+        bad = true
+        const message = formatServerError(error, undefined, "Audio playback failed")
+        voiceDebug.queue({
+          state: "error",
+          pending: 0,
+          mode: "htmlaudio",
+          muted: input.mute(),
+          volume: gain(),
+          error: message,
+        })
+        showToast({ title: "Voice failed", description: message })
+      })
+    }, 0)
   }
 
   createEffect(() => {
     input.mute()
     input.volume()
-    ctrl.update()
+    sync()
   })
 
   createEffect((prev) => {
@@ -368,12 +418,8 @@ export function createMessageVoice(input: {
       return next
     }
     if (prev && prev !== next) {
-      clear()
-      clearSync()
-      live = ""
-      busy = ""
+      reset()
       done = ""
-      warm = ""
     }
     if (next && next !== mute) mute = ""
     return next
@@ -382,14 +428,9 @@ export function createMessageVoice(input: {
   createEffect((prev) => {
     const next = input.session()
     if (prev && prev !== next) {
-      clear()
-      clearSync()
-      live = ""
-      busy = ""
+      reset()
       done = ""
       mute = ""
-      warm = ""
-      ctrl.stop()
     }
     return next
   })
@@ -397,37 +438,15 @@ export function createMessageVoice(input: {
   createEffect((prev) => {
     const next = input.turn()
     if (prev && next && prev !== next && input.cfg().tts.stop_on_interrupt) {
-      clear()
-      clearSync()
-      live = ""
-      busy = ""
+      reset()
       done = ""
       mute = ""
-      warm = ""
-      ctrl.stop()
       voiceDebug.tts({
         state: "idle",
         error: undefined,
       })
     }
     return next
-  })
-
-  createEffect(() => {
-    const msg = input.msg()
-    if (!msg) return
-    if (warm === msg) return
-    if (!enabled()) return
-    if (input.status().type === "idle") return
-    warm = msg
-    void input.globalSDK.client.global.voice
-      .ensure({
-        voiceEnsureInput: {
-          target: "tts",
-          preload: true,
-        },
-      })
-      .catch(() => undefined)
   })
 
   createEffect(() => {
@@ -441,35 +460,20 @@ export function createMessageVoice(input: {
       })
       return
     }
-    if (liveEnabled()) {
-      push(msg, text)
-      return
-    }
     voiceDebug.tts({
       state: text.trim() ? "running" : "idle",
       preset: preset(),
       text,
       error: undefined,
     })
-    ctrl.stop()
   })
 
   createEffect((prev) => {
     const next = input.status().type
-    if (prev !== "idle" && next === "idle") {
-      clearSync()
-      const msg = input.msg()
-      if (msg) ctrl.sync({ msg, text: joinVoiceText(input.parts()), done: true })
-      ctrl.flush()
-    }
     if (!enabled()) {
-      clear()
-      clearSync()
-      live = ""
-      busy = ""
+      reset()
       done = ""
       mute = input.msg() ?? ""
-      ctrl.stop()
       voiceDebug.tts({
         state: "idle",
         error: undefined,
@@ -487,10 +491,9 @@ export function createMessageVoice(input: {
   })
 
   onCleanup(() => {
-    clear()
-    clearSync()
-    ctrl.stop()
-    queue.dispose()
+    reset()
+    if (audio && "remove" in audio && typeof audio.remove === "function") audio.remove()
+    audio = undefined
     voiceDebug.tts({
       state: "idle",
       error: undefined,

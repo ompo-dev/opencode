@@ -10,6 +10,10 @@ import { startVoiceStream } from "@/components/prompt-input/voice"
 import { createVoiceCtrl, joinVoiceText } from "./message-voice"
 
 const idle = 0.08
+const step = (text: string, base: number, effort: number, low: number, high: number) => {
+  const cap = text.trim().length <= 12 ? low + 2 : text.trim().length <= 32 ? high - 2 : high
+  return Math.max(low, Math.min(cap, Math.round(base * effort)))
+}
 
 export function createSessionCall(input: {
   globalSDK: ReturnType<typeof useGlobalSDK>
@@ -59,6 +63,11 @@ export function createSessionCall(input: {
     clearTimeout(sync)
     sync = undefined
   }
+  const drop = () => {
+    reset()
+    voiceCall.vad("idle")
+    void mic?.reset()
+  }
 
   const preset = () => input.cfg().tts.default_preset ?? input.cfg().tts.presets[0]?.id
   const on = () => voiceCall.state.active && input.cfg().runtime.enabled
@@ -74,6 +83,7 @@ export function createSessionCall(input: {
     next = { msg, text, done }
     if (done) {
       clearSync()
+      voiceCall.assistant(text)
       ctrl?.sync(next)
       return
     }
@@ -81,12 +91,16 @@ export function createSessionCall(input: {
     sync = setTimeout(() => {
       sync = undefined
       if (!next.msg) return
+      voiceCall.assistant(next.text)
       ctrl?.sync(next)
     }, 120)
   }
 
   let ctrl: ReturnType<typeof createVoiceCtrl> | undefined
   const queue = createAudioQueue({
+    // The settings preview is stable because it goes through the browser media
+    // element path. The progressive chat/call queue should follow the same
+    // playback backend on Tauri/WebView2 instead of WebAudio.
     prefer: "htmlaudio",
     muted: input.mute,
     volume: input.volume,
@@ -128,7 +142,7 @@ export function createSessionCall(input: {
           preset: preset(),
           profile: "call",
           rank: meta.rank,
-          num_step: Math.max(10, Math.round(input.cfg().tts.call_num_step * meta.effort)),
+          num_step: step(text, input.cfg().tts.call_num_step, meta.effort, 8, 14),
         }),
       })
       .then((res) => {
@@ -272,12 +286,21 @@ export function createSessionCall(input: {
   }
 
   const frame = (input2: { peak: number; rms: number; chunk_ms: number }) => {
+    const playing = queue.state().state === "playing" || queue.state().state === "loading"
+    if (playing) {
+      if (vad !== "idle") {
+        vad = "idle"
+        voiceCall.vad("idle")
+      }
+      return
+    }
     const value = Math.max(input2.rms, input2.peak * 0.7)
     voiceCall.userWave(bar(input2.peak, input2.rms))
     if (!voiceCall.state.active) return
     if (busy) return
     if (!talk && value < floor * 1.5) floor = floor * 0.995 + value * 0.005
     const limit = Math.max(0.009, floor * 2.2)
+    const trigger = 90
     const hit = value > limit
     if (hit) {
       gate += input2.chunk_ms
@@ -286,7 +309,7 @@ export function createSessionCall(input: {
         vad = "speech"
         voiceCall.vad("speech")
       }
-      if (!talk && gate >= 90) {
+      if (!talk && gate >= trigger) {
         talk = true
         voiceCall.phase("user_speaking")
         if (
@@ -378,7 +401,7 @@ export function createSessionCall(input: {
     const ready = await input.globalSDK.client.global.voice
       .ensure({
         voiceEnsureInput: {
-          target: "all",
+          target: "stt",
           preload: true,
         },
       })
@@ -395,6 +418,14 @@ export function createSessionCall(input: {
     const rec = await startVoiceStream({
       device: input.device() || undefined,
       onFrame: frame,
+      max_ms: 30_000,
+      capture: () => {
+        if (talk || busy || voiceCall.state.pending_user_turn) return true
+        const state = queue.state().state
+        const playing = state === "playing" || state === "loading"
+        if (!playing && input.status().type === "idle") return true
+        return false
+      },
     }).catch((error) => {
       fail(error, "Microphone capture could not start")
       return undefined
@@ -429,13 +460,13 @@ export function createSessionCall(input: {
     if (seed && msg === seed && input.status().type === "idle") return
     if (seed && msg !== seed) seed = ""
     const text = joinVoiceText(input.parts())
-    voiceCall.assistant(text)
     push(msg, text)
   })
 
   createEffect((prev) => {
     const next = input.status().type
     if (!voiceCall.state.active) return next
+    if (prev === "idle" && next !== "idle") drop()
     if (prev !== "idle" && next === "idle") {
       clearSync()
       const msg = input.msg()

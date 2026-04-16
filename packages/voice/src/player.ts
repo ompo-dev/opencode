@@ -1,7 +1,9 @@
 type Mode = "webaudio" | "htmlaudio" | "none"
 type State = "idle" | "loading" | "playing" | "blocked" | "error"
 type Item = {
+  type: string
   src: string
+  raw?: ArrayBuffer
   audio?: HTMLAudioElement
 }
 
@@ -32,13 +34,23 @@ const decode = (src: string) => {
   if (!match) throw new Error("Invalid audio payload")
 
   if (!match[2]) {
-    return new TextEncoder().encode(decodeURIComponent(match[3] ?? "")).buffer
+    const out = new TextEncoder().encode(decodeURIComponent(match[3] ?? ""))
+    return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer
   }
 
   const raw = atob(match[3] ?? "")
   const out = new Uint8Array(raw.length)
   for (let idx = 0; idx < raw.length; idx += 1) out[idx] = raw.charCodeAt(idx)
-  return out.buffer
+  return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer
+}
+
+const parse = (src: string) => {
+  const match = src.match(/^data:([^;,]+)?(;base64)?,([\s\S]*)$/)
+  if (!match) throw new Error("Invalid audio payload")
+  return {
+    src,
+    type: match[1] || "application/octet-stream",
+  } satisfies Item
 }
 
 export function createAudioQueue(input?: {
@@ -50,11 +62,10 @@ export function createAudioQueue(input?: {
   let ctx: AudioContext | undefined
   let gain: GainNode | undefined
   let node: AudioBufferSourceNode | undefined
-  let html: HTMLAudioElement | undefined
   let item: Item | undefined
   let dead = false
   let rev = 0
-  const list: string[] = []
+  const list: Item[] = []
   const prefer = input?.prefer ?? "webaudio"
   const canWeb = !!ctor()
   const canHtml = typeof Audio !== "undefined"
@@ -82,22 +93,20 @@ export function createAudioQueue(input?: {
     const volume = clamp(input?.volume?.())
     const muted = input?.muted?.() ?? false
     if (gain) gain.gain.value = muted ? 0 : volume
-    if (html) html.volume = muted ? 0 : volume
+    if (item?.audio) item.audio.volume = muted ? 0 : volume
     emit({ muted, volume })
   }
 
-  const ensureHtml = () => {
-    if (html) return html
+  const makeHtml = () => {
     if (typeof Audio === "undefined") return
-    html =
+    return (
       typeof document === "undefined"
         ? new Audio()
         : Object.assign(document.createElement("audio"), {
             preload: "auto",
             style: "display:none",
           })
-    if (typeof document !== "undefined") document.body.append(html)
-    return html
+    )
   }
 
   const stopItem = (current?: Item) => {
@@ -109,6 +118,8 @@ export function createAudioQueue(input?: {
       current.audio.removeAttribute("src")
       current.audio.src = ""
       if (typeof current.audio.load === "function") current.audio.load()
+      if ("remove" in current.audio && typeof current.audio.remove === "function") current.audio.remove()
+      current.audio = undefined
     }
     if (node) {
       node.onended = null
@@ -125,6 +136,8 @@ export function createAudioQueue(input?: {
   const done = (current: Item) => {
     if (item !== current) return
     stopItem(current)
+    current.raw = undefined
+    current.src = ""
     item = undefined
     emit({ state: list.length ? "loading" : "idle", error: undefined })
     void pump()
@@ -163,7 +176,8 @@ export function createAudioQueue(input?: {
       mode: "webaudio",
       error: undefined,
     })
-    const raw = decode(current.src)
+    const raw = current.raw ?? decode(current.src)
+    current.raw = undefined
     const buf = await audio.decodeAudioData(raw.slice(0) as ArrayBuffer)
     if (dead || turn !== rev || item !== current) return true
 
@@ -182,10 +196,12 @@ export function createAudioQueue(input?: {
   }
 
   const playHtml = async (current: Item) => {
-    const audio = current.audio ?? ensureHtml()
+    const audio = current.audio ?? makeHtml()
     if (!audio) return false
     current.audio = audio
+    if (typeof document !== "undefined") document.body.append(audio)
     audio.src = current.src
+    current.src = ""
     audio.onended = () => done(current)
     audio.onerror = () => {
       emit({
@@ -214,15 +230,15 @@ export function createAudioQueue(input?: {
     if (dead) return
     if (item && (snap.state === "playing" || snap.state === "loading")) return
     if (!item) {
-      const src = list.shift()
-      if (!src) {
+      const next = list.shift()
+      if (!next) {
         emit({
           state: "idle",
           error: undefined,
         })
         return
       }
-      item = { src }
+      item = next
     }
 
     const current = item
@@ -278,7 +294,7 @@ export function createAudioQueue(input?: {
 
   return {
     enqueue(src: string) {
-      list.push(src)
+      list.push(parse(src))
       emit({
         state: item ? snap.state : "loading",
         error: snap.state === "blocked" ? snap.error : undefined,
@@ -314,8 +330,6 @@ export function createAudioQueue(input?: {
       if (audio && audio.state !== "closed") {
         void audio.close().catch(() => undefined)
       }
-      if (html && "remove" in html && typeof html.remove === "function") html.remove()
-      html = undefined
       ctx = undefined
       gain = undefined
       node = undefined

@@ -76,11 +76,18 @@ const text = (input?: string) => {
 }
 
 function patch<K extends keyof State>(key: K, next: Partial<State[K]>) {
-  setState(key, (prev) => ({
-    ...prev,
-    ...next,
-    at: now(),
-  }))
+  setState(key, (prev) => {
+    const merged = {
+      ...prev,
+      ...next,
+    }
+    const same = Object.keys(next).every((item) => prev[item as keyof State[K]] === merged[item as keyof State[K]])
+    if (same) return prev
+    return {
+      ...merged,
+      at: now(),
+    }
+  })
 }
 
 export const voiceDebug = {

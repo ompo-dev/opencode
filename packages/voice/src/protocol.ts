@@ -14,6 +14,13 @@ export const Warm = Base.extend({
       cfg: ConfigCfg,
       stt: z.boolean().optional(),
       tts: z.boolean().optional(),
+      clone: z
+        .object({
+          mode: VoiceMode.optional(),
+          ref_audio_path: z.string().optional(),
+          ref_text: z.string().optional(),
+        })
+        .optional(),
     })
     .strict(),
 }).meta({ ref: "VoiceWorkerWarm" })

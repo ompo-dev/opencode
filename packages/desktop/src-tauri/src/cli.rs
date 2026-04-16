@@ -368,6 +368,7 @@ pub fn spawn_command(
     args: &str,
     extra_env: &[(&str, String)],
 ) -> Result<(impl Stream<Item = CommandEvent> + 'static, CommandChild), std::io::Error> {
+    let wsl = cfg!(windows) && is_wsl_enabled(app);
     let data_dir = app
         .path()
         .resolve("", BaseDirectory::AppLocalData)
@@ -385,6 +386,14 @@ pub fn spawn_command(
         (
             "OPENCODE_EXPERIMENTAL_FILEWATCHER".to_string(),
             "true".to_string(),
+        ),
+        (
+            "OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER".to_string(),
+            if cfg!(windows) && !wsl {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            },
         ),
         ("OPENCODE_CLIENT".to_string(), "desktop".to_string()),
         (
@@ -407,7 +416,7 @@ pub fn spawn_command(
     );
 
     let mut cmd = if cfg!(windows) {
-        if is_wsl_enabled(app) {
+        if wsl {
             tracing::info!("WSL is enabled, spawning CLI server in WSL");
             let version = app.package_info().version.to_string();
             let mut script = vec![
@@ -424,6 +433,7 @@ pub fn spawn_command(
             let mut env_prefix = vec![
                 "OPENCODE_EXPERIMENTAL_ICON_DISCOVERY=true".to_string(),
                 "OPENCODE_EXPERIMENTAL_FILEWATCHER=true".to_string(),
+                "OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER=false".to_string(),
                 "OPENCODE_CLIENT=desktop".to_string(),
                 "XDG_DATA_HOME=\"$HOME/.local/share\"".to_string(),
                 "XDG_CACHE_HOME=\"$HOME/.cache\"".to_string(),
@@ -433,6 +443,7 @@ pub fn spawn_command(
                 envs.iter()
                     .filter(|(key, _)| key != "OPENCODE_EXPERIMENTAL_ICON_DISCOVERY")
                     .filter(|(key, _)| key != "OPENCODE_EXPERIMENTAL_FILEWATCHER")
+                    .filter(|(key, _)| key != "OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER")
                     .filter(|(key, _)| key != "OPENCODE_CLIENT")
                     .filter(|(key, _)| key != "XDG_DATA_HOME")
                     .filter(|(key, _)| key != "XDG_CACHE_HOME")
