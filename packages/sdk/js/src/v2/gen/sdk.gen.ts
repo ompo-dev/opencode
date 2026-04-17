@@ -5,8 +5,12 @@ import { buildClientParams, type Client, type Options as Options2, type TDataSha
 import type {
   AgentPartInput,
   AppAgentsResponses,
+  AppChannelsResponses,
   AppLogErrors,
   AppLogResponses,
+  AppOutputStyleResponses,
+  AppOutputStylesResponses,
+  AppPluginsResponses,
   AppSkillsResponses,
   Auth as Auth3,
   AuthRemoveErrors,
@@ -87,9 +91,20 @@ import type {
   McpAuthStartResponses,
   McpConnectResponses,
   McpDisconnectResponses,
+  McpHttpConfig,
   McpLocalConfig,
+  McpPromptGetErrors,
+  McpPromptGetResponses,
+  McpPromptsResponses,
   McpRemoteConfig,
+  McpResourceReadErrors,
+  McpResourceReadResponses,
+  McpResourcesResponses,
+  McpSdkConfig,
+  McpSseConfig,
   McpStatusResponses,
+  McpStdioConfig,
+  McpWsConfig,
   OutlineDocumentCreate,
   OutlineDocumentGetResponses,
   OutlineDocumentUpdate,
@@ -229,6 +244,17 @@ import type {
   VoiceReferenceInput,
   VoiceSynthesizeInput,
   VoiceTranscribeInput,
+  WorkflowAction,
+  WorkflowCreateInput,
+  WorkflowCreateResponses,
+  WorkflowDeleteResponses,
+  WorkflowGetResponses,
+  WorkflowListResponses,
+  WorkflowPauseResponses,
+  WorkflowResumeResponses,
+  WorkflowSchedule,
+  WorkflowTriggerResponses,
+  WorkflowUpdateResponses,
   WorktreeCreateErrors,
   WorktreeCreateInput,
   WorktreeCreateResponses,
@@ -783,6 +809,126 @@ export class App extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<AppSkillsResponses, unknown, ThrowOnError>({
       url: "/skill",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List output styles
+   *
+   * Get all available response output styles from built-ins and enabled plugins.
+   */
+  public outputStyles<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<AppOutputStylesResponses, unknown, ThrowOnError>({
+      url: "/output-style",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get active output style
+   *
+   * Get the currently active response output style after plugin forcing and config selection.
+   */
+  public outputStyle<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<AppOutputStyleResponses, unknown, ThrowOnError>({
+      url: "/output-style/active",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List plugins
+   *
+   * Get all loaded runtime plugins with merged manifest metadata.
+   */
+  public plugins<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<AppPluginsResponses, unknown, ThrowOnError>({
+      url: "/plugin",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List channels
+   *
+   * Get plugin-defined channels available to the current runtime.
+   */
+  public channels<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<AppChannelsResponses, unknown, ThrowOnError>({
+      url: "/channel",
       ...options,
       ...params,
     })
@@ -3246,6 +3392,284 @@ export class Kanban2 extends HeyApiClient {
   }
 }
 
+export class Workflow extends HeyApiClient {
+  /**
+   * List workflows
+   *
+   * Get all durable workflows for the current project.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<WorkflowListResponses, unknown, ThrowOnError>({
+      url: "/workflow",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Create workflow
+   *
+   * Create a durable workflow for the current project.
+   */
+  public create<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      workflowCreateInput?: WorkflowCreateInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "workflowCreateInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<WorkflowCreateResponses, unknown, ThrowOnError>({
+      url: "/workflow",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete workflow
+   *
+   * Delete a workflow.
+   */
+  public delete<ThrowOnError extends boolean = false>(
+    parameters: {
+      workflowID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "workflowID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<WorkflowDeleteResponses, unknown, ThrowOnError>({
+      url: "/workflow/{workflowID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get workflow
+   *
+   * Get a workflow by id.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      workflowID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "workflowID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<WorkflowGetResponses, unknown, ThrowOnError>({
+      url: "/workflow/{workflowID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Update workflow
+   *
+   * Update an existing workflow.
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      workflowID: string
+      directory?: string
+      workspace?: string
+      name?: string
+      description?: string | null
+      sessionID?: string | null
+      enabled?: boolean
+      schedule?: WorkflowSchedule
+      action?: WorkflowAction
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "workflowID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "name" },
+            { in: "body", key: "description" },
+            { in: "body", key: "sessionID" },
+            { in: "body", key: "enabled" },
+            { in: "body", key: "schedule" },
+            { in: "body", key: "action" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<WorkflowUpdateResponses, unknown, ThrowOnError>({
+      url: "/workflow/{workflowID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Trigger workflow
+   *
+   * Run a workflow immediately.
+   */
+  public trigger<ThrowOnError extends boolean = false>(
+    parameters: {
+      workflowID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "workflowID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<WorkflowTriggerResponses, unknown, ThrowOnError>({
+      url: "/workflow/{workflowID}/trigger",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Pause workflow
+   *
+   * Pause scheduled execution for a workflow.
+   */
+  public pause<ThrowOnError extends boolean = false>(
+    parameters: {
+      workflowID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "workflowID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<WorkflowPauseResponses, unknown, ThrowOnError>({
+      url: "/workflow/{workflowID}/pause",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Resume workflow
+   *
+   * Resume scheduled execution for a workflow.
+   */
+  public resume<ThrowOnError extends boolean = false>(
+    parameters: {
+      workflowID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "workflowID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<WorkflowResumeResponses, unknown, ThrowOnError>({
+      url: "/workflow/{workflowID}/resume",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Document extends HeyApiClient {
   /**
    * Get Outline document
@@ -3630,6 +4054,92 @@ export class Event extends HeyApiClient {
   }
 }
 
+export class Prompt extends HeyApiClient {
+  /**
+   * Read MCP prompt
+   *
+   * Fetch a prompt definition from a connected Model Context Protocol (MCP) server.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      client?: string
+      name?: string
+      args?: {
+        [key: string]: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "client" },
+            { in: "body", key: "name" },
+            { in: "body", key: "args" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<McpPromptGetResponses, McpPromptGetErrors, ThrowOnError>({
+      url: "/mcp/prompt",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Resource2 extends HeyApiClient {
+  /**
+   * Read MCP resource
+   *
+   * Read a resource from a connected Model Context Protocol (MCP) server.
+   */
+  public read<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      client?: string
+      uri?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "client" },
+            { in: "body", key: "uri" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<McpResourceReadResponses, McpResourceReadErrors, ThrowOnError>({
+      url: "/mcp/resource",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Auth2 extends HeyApiClient {
   /**
    * Remove MCP OAuth
@@ -3810,7 +4320,14 @@ export class Mcp extends HeyApiClient {
       directory?: string
       workspace?: string
       name?: string
-      config?: McpLocalConfig | McpRemoteConfig
+      config?:
+        | McpLocalConfig
+        | McpStdioConfig
+        | McpRemoteConfig
+        | McpHttpConfig
+        | McpSseConfig
+        | McpWsConfig
+        | McpSdkConfig
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3836,6 +4353,66 @@ export class Mcp extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * List MCP prompts
+   *
+   * List prompts exposed by connected Model Context Protocol (MCP) servers.
+   */
+  public prompts<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<McpPromptsResponses, unknown, ThrowOnError>({
+      url: "/mcp/prompts",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List MCP resources
+   *
+   * List resources exposed by connected Model Context Protocol (MCP) servers.
+   */
+  public resources<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<McpResourcesResponses, unknown, ThrowOnError>({
+      url: "/mcp/resources",
+      ...options,
+      ...params,
     })
   }
 
@@ -3897,6 +4474,16 @@ export class Mcp extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+
+  private _prompt?: Prompt
+  get prompt(): Prompt {
+    return (this._prompt ??= new Prompt({ client: this.client }))
+  }
+
+  private _resource?: Resource2
+  get resource(): Resource2 {
+    return (this._resource ??= new Resource2({ client: this.client }))
   }
 
   private _auth?: Auth2
@@ -5310,6 +5897,11 @@ export class OpencodeClient extends HeyApiClient {
   private _kanban?: Kanban2
   get kanban(): Kanban2 {
     return (this._kanban ??= new Kanban2({ client: this.client }))
+  }
+
+  private _workflow?: Workflow
+  get workflow(): Workflow {
+    return (this._workflow ??= new Workflow({ client: this.client }))
   }
 
   private _outline?: Outline

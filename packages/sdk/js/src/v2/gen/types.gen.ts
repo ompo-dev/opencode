@@ -714,17 +714,32 @@ export type EventCommandExecuted = {
   }
 }
 
-export type EventWorkspaceReady = {
-  type: "workspace.ready"
+export type SessionStatus =
+  | {
+      type: "idle"
+    }
+  | {
+      type: "retry"
+      attempt: number
+      message: string
+      next: number
+    }
+  | {
+      type: "busy"
+    }
+
+export type EventSessionStatus = {
+  type: "session.status"
   properties: {
-    name: string
+    sessionID: string
+    status: SessionStatus
   }
 }
 
-export type EventWorkspaceFailed = {
-  type: "workspace.failed"
+export type EventSessionIdle = {
+  type: "session.idle"
   properties: {
-    message: string
+    sessionID: string
   }
 }
 
@@ -799,35 +814,6 @@ export type EventQuestionRejected = {
   }
 }
 
-export type SessionStatus =
-  | {
-      type: "idle"
-    }
-  | {
-      type: "retry"
-      attempt: number
-      message: string
-      next: number
-    }
-  | {
-      type: "busy"
-    }
-
-export type EventSessionStatus = {
-  type: "session.status"
-  properties: {
-    sessionID: string
-    status: SessionStatus
-  }
-}
-
-export type EventSessionIdle = {
-  type: "session.idle"
-  properties: {
-    sessionID: string
-  }
-}
-
 export type EventSessionCompacted = {
   type: "session.compacted"
   properties: {
@@ -860,6 +846,103 @@ export type EventTodoUpdated = {
   properties: {
     sessionID: string
     todos: Array<Todo>
+  }
+}
+
+export type WorkflowSchedule =
+  | {
+      type: "manual"
+    }
+  | {
+      type: "once"
+      at: number
+    }
+  | {
+      type: "interval"
+      everyMs: number
+      startAt?: number
+    }
+  | {
+      type: "cron"
+      expression: string
+    }
+
+export type WorkflowModel = string
+
+export type WorkflowAction =
+  | {
+      type: "prompt"
+      prompt: string
+      agent?: string
+      model?: WorkflowModel
+      variant?: string
+    }
+  | {
+      type: "command"
+      command: string
+      arguments?: string
+      agent?: string
+      model?: WorkflowModel
+      variant?: string
+    }
+  | {
+      type: "shell"
+      script: string
+      agent?: string
+      model?: WorkflowModel
+    }
+
+export type Workflow = {
+  id: string
+  projectID: string
+  sessionID?: string
+  lastSessionID?: string
+  name: string
+  description?: string
+  enabled: boolean
+  status: "idle" | "running" | "paused"
+  schedule: WorkflowSchedule
+  action: WorkflowAction
+  runCount: number
+  lastError?: string
+  time: {
+    created: number
+    updated: number
+    nextRun?: number
+    lastRun?: number
+    lastSuccess?: number
+    lastError?: number
+    claimed?: number
+    claimUntil?: number
+  }
+}
+
+export type EventWorkflowUpdated = {
+  type: "workflow.updated"
+  properties: Workflow
+}
+
+export type EventWorkflowRun = {
+  type: "workflow.run"
+  properties: {
+    workflowID: string
+    sessionID?: string
+    status: "running" | "success" | "failed"
+    error?: string
+  }
+}
+
+export type EventWorkspaceReady = {
+  type: "workspace.ready"
+  properties: {
+    name: string
+  }
+}
+
+export type EventWorkspaceFailed = {
+  type: "workspace.failed"
+  properties: {
+    message: string
   }
 }
 
@@ -1394,16 +1477,18 @@ export type Event =
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
   | EventCommandExecuted
-  | EventWorkspaceReady
-  | EventWorkspaceFailed
+  | EventSessionStatus
+  | EventSessionIdle
   | EventQuestionAsked
   | EventQuestionReplied
   | EventQuestionRejected
-  | EventSessionStatus
-  | EventSessionIdle
   | EventSessionCompacted
   | EventKanbanUpdated
   | EventTodoUpdated
+  | EventWorkflowUpdated
+  | EventWorkflowRun
+  | EventWorkspaceReady
+  | EventWorkspaceFailed
   | EventPtyCreated
   | EventPtyUpdated
   | EventPtyExited
@@ -1582,6 +1667,10 @@ export type PermissionConfig =
       lsp?: PermissionRuleConfig
       doom_loop?: PermissionActionConfig
       skill?: PermissionRuleConfig
+      sleep?: PermissionActionConfig
+      task_status?: PermissionRuleConfig
+      task_wait?: PermissionRuleConfig
+      task_message?: PermissionRuleConfig
       [key: string]: PermissionRuleConfig | Array<string> | PermissionActionConfig | undefined
     }
   | PermissionActionConfig
@@ -1806,9 +1895,30 @@ export type VoiceConfig = {
 
 export type McpLocalConfig = {
   /**
+   * Command and arguments to run the MCP server
+   */
+  command: Array<string>
+  /**
+   * Environment variables to set when running the MCP server
+   */
+  environment?: {
+    [key: string]: string
+  }
+  /**
+   * Enable or disable the MCP server on startup
+   */
+  enabled?: boolean
+  /**
+   * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
+   */
+  timeout?: number
+  /**
    * Type of MCP server connection
    */
   type: "local"
+}
+
+export type McpStdioConfig = {
   /**
    * Command and arguments to run the MCP server
    */
@@ -1827,6 +1937,10 @@ export type McpLocalConfig = {
    * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
    */
   timeout?: number
+  /**
+   * Type of MCP server connection
+   */
+  type: "stdio"
 }
 
 export type McpOAuthConfig = {
@@ -1850,9 +1964,34 @@ export type McpOAuthConfig = {
 
 export type McpRemoteConfig = {
   /**
+   * URL of the remote MCP server
+   */
+  url: string
+  /**
+   * Enable or disable the MCP server on startup
+   */
+  enabled?: boolean
+  /**
+   * Headers to send with the request
+   */
+  headers?: {
+    [key: string]: string
+  }
+  /**
+   * OAuth authentication configuration for the MCP server. Set to false to disable OAuth auto-detection.
+   */
+  oauth?: McpOAuthConfig | false
+  /**
+   * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
+   */
+  timeout?: number
+  /**
    * Type of MCP server connection
    */
   type: "remote"
+}
+
+export type McpHttpConfig = {
   /**
    * URL of the remote MCP server
    */
@@ -1875,6 +2014,87 @@ export type McpRemoteConfig = {
    * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
    */
   timeout?: number
+  /**
+   * Type of MCP server connection
+   */
+  type: "http"
+}
+
+export type McpSseConfig = {
+  /**
+   * URL of the remote MCP server
+   */
+  url: string
+  /**
+   * Enable or disable the MCP server on startup
+   */
+  enabled?: boolean
+  /**
+   * Headers to send with the request
+   */
+  headers?: {
+    [key: string]: string
+  }
+  /**
+   * OAuth authentication configuration for the MCP server. Set to false to disable OAuth auto-detection.
+   */
+  oauth?: McpOAuthConfig | false
+  /**
+   * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
+   */
+  timeout?: number
+  /**
+   * Type of MCP server connection
+   */
+  type: "sse"
+}
+
+export type McpWsConfig = {
+  /**
+   * URL of the remote MCP server
+   */
+  url: string
+  /**
+   * Enable or disable the MCP server on startup
+   */
+  enabled?: boolean
+  /**
+   * Headers to send with the request
+   */
+  headers?: {
+    [key: string]: string
+  }
+  /**
+   * OAuth authentication configuration for the MCP server. Set to false to disable OAuth auto-detection.
+   */
+  oauth?: McpOAuthConfig | false
+  /**
+   * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
+   */
+  timeout?: number
+  /**
+   * Type of MCP server connection
+   */
+  type: "ws"
+}
+
+export type McpSdkConfig = {
+  /**
+   * Type of MCP server connection
+   */
+  type: "sdk"
+  /**
+   * Enable or disable the MCP server on startup
+   */
+  enabled?: boolean
+  /**
+   * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
+   */
+  timeout?: number
+  /**
+   * Named in-process MCP client to bind to
+   */
+  client?: string
 }
 
 /**
@@ -1906,6 +2126,14 @@ export type Config = {
    */
   skills?: {
     /**
+     * Enable bundled skills shipped with opencode
+     */
+    bundled?: boolean
+    /**
+     * Additional managed skill folder paths
+     */
+    managed?: Array<string>
+    /**
      * Additional paths to skill folders
      */
     paths?: Array<string>
@@ -1930,6 +2158,35 @@ export type Config = {
         },
       ]
   >
+  /**
+   * Plugin marketplace, cache, and policy settings
+   */
+  plugins?: {
+    /**
+     * Known plugin marketplaces and source locations
+     */
+    marketplaces?: {
+      [key: string]: {
+        url?: string
+        type?: "npm" | "git" | "file" | "directory"
+      }
+    }
+    /**
+     * Plugin policy and lockdown controls
+     */
+    policy?: {
+      lockdown?: boolean
+      allow?: Array<string>
+      deny?: Array<string>
+    }
+    /**
+     * Plugin cache settings
+     */
+    cache?: {
+      version?: string
+      directory?: string
+    }
+  }
   /**
    * Control sharing behavior:'manual' allows manual sharing via commands, 'auto' enables automatic sharing, 'disabled' disables all sharing
    */
@@ -1962,6 +2219,10 @@ export type Config = {
    * Default agent to use when none is specified. Must be a primary agent. Falls back to 'build' if not set or if the specified agent is invalid.
    */
   default_agent?: string
+  /**
+   * Preferred response output style. Use 'default' to disable custom style prompts.
+   */
+  output_style?: string
   /**
    * Custom username to display in conversations instead of system username
    */
@@ -2000,7 +2261,12 @@ export type Config = {
   mcp?: {
     [key: string]:
       | McpLocalConfig
+      | McpStdioConfig
       | McpRemoteConfig
+      | McpHttpConfig
+      | McpSseConfig
+      | McpWsConfig
+      | McpSdkConfig
       | {
           enabled: boolean
         }
@@ -2384,6 +2650,15 @@ export type ProviderAuthAuthorization = {
   instructions: string
 }
 
+export type WorkflowCreateInput = {
+  name: string
+  description?: string
+  sessionID?: string
+  enabled?: boolean
+  schedule: WorkflowSchedule
+  action: WorkflowAction
+}
+
 export type OutlineMark = {
   type: string
   attrs?: {
@@ -2545,7 +2820,7 @@ export type Command = {
   description?: string
   agent?: string
   model?: string
-  source?: "command" | "mcp" | "skill"
+  source?: "command" | "mcp" | "skill" | "plugin"
   template: string
   subtask?: boolean
   hints: Array<string>
@@ -2571,6 +2846,298 @@ export type Agent = {
     [key: string]: unknown
   }
   steps?: number
+}
+
+export type OutputStyle = {
+  name: string
+  description: string
+  prompt: string
+  source: "builtin" | "plugin" | "config"
+  plugin?: string
+  keepCodingInstructions?: boolean
+  forceForPlugin?: boolean
+  location?: string
+}
+
+export type PluginDescriptor = {
+  id: string
+  spec: string
+  version?: string
+  keys: Array<string>
+  source: "file" | "npm"
+  target: string
+  dir: string
+  scope: "global" | "local"
+  options?: {
+    [key: string]: unknown
+  }
+  manifest?: {
+    id?: string
+    name?: string
+    version?: string
+    hooks?: Array<string>
+    dependencies?: {
+      [key: string]:
+        | string
+        | {
+            id?: string
+            version?: string
+            optional?: boolean
+            [key: string]: unknown | string | boolean | undefined
+          }
+    }
+    commands?: {
+      [key: string]: {
+        name?: string
+        description?: string
+        template?: string
+        path?: string
+        agent?: string
+        model?: string
+        subtask?: boolean
+        [key: string]: unknown | string | boolean | undefined
+      }
+    }
+    agents?: {
+      [key: string]: {
+        name?: string
+        description?: string
+        prompt?: string
+        path?: string
+        mode?: "subagent" | "primary" | "all"
+        model?: string
+        variant?: string
+        temperature?: number
+        top_p?: number
+        color?: string
+        hidden?: boolean
+        steps?: number
+        permission?: {
+          [key: string]: unknown
+        }
+        options?: {
+          [key: string]: unknown
+        }
+        [key: string]:
+          | unknown
+          | string
+          | "subagent"
+          | "primary"
+          | "all"
+          | number
+          | boolean
+          | number
+          | {
+              [key: string]: unknown
+            }
+          | {
+              [key: string]: unknown
+            }
+          | undefined
+      }
+    }
+    skills?: {
+      [key: string]: {
+        name?: string
+        description?: string
+        path: string
+        paths?: Array<string>
+        agent?: string
+        model?: string
+        mode?: "inline" | "subagent"
+        [key: string]: unknown | string | Array<string> | "inline" | "subagent" | undefined
+      }
+    }
+    mcpServers?: {
+      [key: string]: {
+        name?: string
+        description?: string
+        enabled?: boolean
+        config?: {
+          [key: string]: unknown
+        }
+        [key: string]:
+          | unknown
+          | string
+          | boolean
+          | {
+              [key: string]: unknown
+            }
+          | undefined
+      }
+    }
+    lspServers?: {
+      [key: string]: {
+        [key: string]: unknown
+      }
+    }
+    outputStyles?: {
+      [key: string]: {
+        name?: string
+        description?: string
+        prompt?: string
+        path?: string
+        keepCodingInstructions?: boolean
+        forceForPlugin?: boolean
+        [key: string]: unknown | string | boolean | undefined
+      }
+    }
+    userConfig?: {
+      [key: string]: unknown
+    }
+    channels?: {
+      [key: string]: {
+        name?: string
+        description?: string
+        prompt?: string
+        path?: string
+        enabled?: boolean
+        [key: string]: unknown | string | boolean | undefined
+      }
+    }
+    [key: string]:
+      | unknown
+      | string
+      | Array<string>
+      | {
+          [key: string]:
+            | string
+            | {
+                id?: string
+                version?: string
+                optional?: boolean
+                [key: string]: unknown | string | boolean | undefined
+              }
+        }
+      | {
+          [key: string]: {
+            name?: string
+            description?: string
+            template?: string
+            path?: string
+            agent?: string
+            model?: string
+            subtask?: boolean
+            [key: string]: unknown | string | boolean | undefined
+          }
+        }
+      | {
+          [key: string]: {
+            name?: string
+            description?: string
+            prompt?: string
+            path?: string
+            mode?: "subagent" | "primary" | "all"
+            model?: string
+            variant?: string
+            temperature?: number
+            top_p?: number
+            color?: string
+            hidden?: boolean
+            steps?: number
+            permission?: {
+              [key: string]: unknown
+            }
+            options?: {
+              [key: string]: unknown
+            }
+            [key: string]:
+              | unknown
+              | string
+              | "subagent"
+              | "primary"
+              | "all"
+              | number
+              | boolean
+              | number
+              | {
+                  [key: string]: unknown
+                }
+              | {
+                  [key: string]: unknown
+                }
+              | undefined
+          }
+        }
+      | {
+          [key: string]: {
+            name?: string
+            description?: string
+            path: string
+            paths?: Array<string>
+            agent?: string
+            model?: string
+            mode?: "inline" | "subagent"
+            [key: string]: unknown | string | Array<string> | "inline" | "subagent" | undefined
+          }
+        }
+      | {
+          [key: string]: {
+            name?: string
+            description?: string
+            enabled?: boolean
+            config?: {
+              [key: string]: unknown
+            }
+            [key: string]:
+              | unknown
+              | string
+              | boolean
+              | {
+                  [key: string]: unknown
+                }
+              | undefined
+          }
+        }
+      | {
+          [key: string]: {
+            [key: string]: unknown
+          }
+        }
+      | {
+          [key: string]: {
+            name?: string
+            description?: string
+            prompt?: string
+            path?: string
+            keepCodingInstructions?: boolean
+            forceForPlugin?: boolean
+            [key: string]: unknown | string | boolean | undefined
+          }
+        }
+      | {
+          [key: string]: unknown
+        }
+      | {
+          [key: string]: {
+            name?: string
+            description?: string
+            prompt?: string
+            path?: string
+            enabled?: boolean
+            [key: string]: unknown | string | boolean | undefined
+          }
+        }
+      | undefined
+  }
+  dataDir: string
+  cacheDir: string
+  configDir: string
+  stateDir: string
+}
+
+export type PluginChannel = {
+  id: string
+  key: string
+  plugin: string
+  dir: string
+  spec: string
+  name?: string
+  description?: string
+  prompt?: string
+  path?: string
+  enabled?: boolean
+  [key: string]: unknown | string | boolean | undefined
 }
 
 export type LspStatus = {
@@ -5096,6 +5663,177 @@ export type KanbanUpdateResponses = {
 
 export type KanbanUpdateResponse = KanbanUpdateResponses[keyof KanbanUpdateResponses]
 
+export type WorkflowListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow"
+}
+
+export type WorkflowListResponses = {
+  /**
+   * Workflow list
+   */
+  200: Array<Workflow>
+}
+
+export type WorkflowListResponse = WorkflowListResponses[keyof WorkflowListResponses]
+
+export type WorkflowCreateData = {
+  body?: WorkflowCreateInput
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow"
+}
+
+export type WorkflowCreateResponses = {
+  /**
+   * Created workflow
+   */
+  200: Workflow
+}
+
+export type WorkflowCreateResponse = WorkflowCreateResponses[keyof WorkflowCreateResponses]
+
+export type WorkflowDeleteData = {
+  body?: never
+  path: {
+    workflowID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/{workflowID}"
+}
+
+export type WorkflowDeleteResponses = {
+  /**
+   * Deletion acknowledgement
+   */
+  200: boolean
+}
+
+export type WorkflowDeleteResponse = WorkflowDeleteResponses[keyof WorkflowDeleteResponses]
+
+export type WorkflowGetData = {
+  body?: never
+  path: {
+    workflowID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/{workflowID}"
+}
+
+export type WorkflowGetResponses = {
+  /**
+   * Workflow
+   */
+  200: Workflow
+}
+
+export type WorkflowGetResponse = WorkflowGetResponses[keyof WorkflowGetResponses]
+
+export type WorkflowUpdateData = {
+  body?: {
+    name?: string
+    description?: string | null
+    sessionID?: string | null
+    enabled?: boolean
+    schedule?: WorkflowSchedule
+    action?: WorkflowAction
+  }
+  path: {
+    workflowID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/{workflowID}"
+}
+
+export type WorkflowUpdateResponses = {
+  /**
+   * Updated workflow
+   */
+  200: Workflow
+}
+
+export type WorkflowUpdateResponse = WorkflowUpdateResponses[keyof WorkflowUpdateResponses]
+
+export type WorkflowTriggerData = {
+  body?: never
+  path: {
+    workflowID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/{workflowID}/trigger"
+}
+
+export type WorkflowTriggerResponses = {
+  /**
+   * Workflow after trigger
+   */
+  200: Workflow
+}
+
+export type WorkflowTriggerResponse = WorkflowTriggerResponses[keyof WorkflowTriggerResponses]
+
+export type WorkflowPauseData = {
+  body?: never
+  path: {
+    workflowID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/{workflowID}/pause"
+}
+
+export type WorkflowPauseResponses = {
+  /**
+   * Paused workflow
+   */
+  200: Workflow
+}
+
+export type WorkflowPauseResponse = WorkflowPauseResponses[keyof WorkflowPauseResponses]
+
+export type WorkflowResumeData = {
+  body?: never
+  path: {
+    workflowID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/{workflowID}/resume"
+}
+
+export type WorkflowResumeResponses = {
+  /**
+   * Resumed workflow
+   */
+  200: Workflow
+}
+
+export type WorkflowResumeResponse = WorkflowResumeResponses[keyof WorkflowResumeResponses]
+
 export type OutlineWorkspaceData = {
   body?: never
   path?: never
@@ -5522,7 +6260,14 @@ export type McpStatusResponse = McpStatusResponses[keyof McpStatusResponses]
 export type McpAddData = {
   body?: {
     name: string
-    config: McpLocalConfig | McpRemoteConfig
+    config:
+      | McpLocalConfig
+      | McpStdioConfig
+      | McpRemoteConfig
+      | McpHttpConfig
+      | McpSseConfig
+      | McpWsConfig
+      | McpSdkConfig
   }
   path?: never
   query?: {
@@ -5551,6 +6296,120 @@ export type McpAddResponses = {
 }
 
 export type McpAddResponse = McpAddResponses[keyof McpAddResponses]
+
+export type McpPromptsData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/mcp/prompts"
+}
+
+export type McpPromptsResponses = {
+  /**
+   * MCP prompt list
+   */
+  200: {
+    [key: string]: {
+      client: string
+      name: string
+      description?: string
+      [key: string]: unknown | string | undefined
+    }
+  }
+}
+
+export type McpPromptsResponse = McpPromptsResponses[keyof McpPromptsResponses]
+
+export type McpResourcesData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/mcp/resources"
+}
+
+export type McpResourcesResponses = {
+  /**
+   * MCP resource list
+   */
+  200: {
+    [key: string]: {
+      client: string
+      name: string
+      uri: string
+      description?: string
+      [key: string]: unknown | string | undefined
+    }
+  }
+}
+
+export type McpResourcesResponse = McpResourcesResponses[keyof McpResourcesResponses]
+
+export type McpPromptGetData = {
+  body?: {
+    client: string
+    name: string
+    args?: {
+      [key: string]: string
+    }
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/mcp/prompt"
+}
+
+export type McpPromptGetErrors = {
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type McpPromptGetError = McpPromptGetErrors[keyof McpPromptGetErrors]
+
+export type McpPromptGetResponses = {
+  /**
+   * MCP prompt
+   */
+  200: unknown
+}
+
+export type McpResourceReadData = {
+  body?: {
+    client: string
+    uri: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/mcp/resource"
+}
+
+export type McpResourceReadErrors = {
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type McpResourceReadError = McpResourceReadErrors[keyof McpResourceReadErrors]
+
+export type McpResourceReadResponses = {
+  /**
+   * MCP resource content
+   */
+  200: unknown
+}
 
 export type McpAuthRemoveData = {
   body?: never
@@ -6379,11 +7238,94 @@ export type AppSkillsResponses = {
     name: string
     description: string
     location: string
+    root: string
     content: string
+    source: "bundled" | "config" | "global" | "plugin" | "project" | "remote"
+    plugin?: string
+    paths?: Array<string>
+    agent?: string
+    model?: string
+    mode?: "inline" | "subagent"
   }>
 }
 
 export type AppSkillsResponse = AppSkillsResponses[keyof AppSkillsResponses]
+
+export type AppOutputStylesData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/output-style"
+}
+
+export type AppOutputStylesResponses = {
+  /**
+   * List of output styles
+   */
+  200: Array<OutputStyle>
+}
+
+export type AppOutputStylesResponse = AppOutputStylesResponses[keyof AppOutputStylesResponses]
+
+export type AppOutputStyleData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/output-style/active"
+}
+
+export type AppOutputStyleResponses = {
+  /**
+   * Active output style
+   */
+  200: OutputStyle | null
+}
+
+export type AppOutputStyleResponse = AppOutputStyleResponses[keyof AppOutputStyleResponses]
+
+export type AppPluginsData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/plugin"
+}
+
+export type AppPluginsResponses = {
+  /**
+   * List of plugins
+   */
+  200: Array<PluginDescriptor>
+}
+
+export type AppPluginsResponse = AppPluginsResponses[keyof AppPluginsResponses]
+
+export type AppChannelsData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/channel"
+}
+
+export type AppChannelsResponses = {
+  /**
+   * List of channels
+   */
+  200: Array<PluginChannel>
+}
+
+export type AppChannelsResponse = AppChannelsResponses[keyof AppChannelsResponses]
 
 export type LspStatusData = {
   body?: never

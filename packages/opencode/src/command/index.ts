@@ -6,7 +6,10 @@ import { Effect, Layer, ServiceMap } from "effect"
 import z from "zod"
 import { Config } from "../config/config"
 import { MCP } from "../mcp"
+import { Plugin } from "../plugin"
+import { resolvePluginAsset } from "../plugin/shared"
 import { Skill } from "../skill"
+import { ConfigMarkdown } from "../config/markdown"
 import { Log } from "../util/log"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
@@ -36,7 +39,7 @@ export namespace Command {
       description: z.string().optional(),
       agent: z.string().optional(),
       model: z.string().optional(),
-      source: z.enum(["command", "mcp", "skill"]).optional(),
+      source: z.enum(["command", "mcp", "skill", "plugin"]).optional(),
       // workaround for zod not supporting async functions natively so we use getters
       // https://zod.dev/v4/changelog?id=zfunction
       template: z.promise(z.string()).or(z.string()),
@@ -77,10 +80,12 @@ export namespace Command {
     Effect.gen(function* () {
       const config = yield* Config.Service
       const mcp = yield* MCP.Service
+      const plugin = yield* Plugin.Service
       const skill = yield* Skill.Service
 
       const init = Effect.fn("Command.state")(function* (ctx) {
         const cfg = yield* config.get()
+        const reg = yield* plugin.registry()
         const commands: Record<string, Info> = {}
 
         commands[Default.INIT] = {
@@ -115,6 +120,25 @@ export namespace Command {
             },
             subtask: command.subtask,
             hints: hints(command.template),
+          }
+        }
+
+        for (const [name, command] of Object.entries(reg.commands)) {
+          commands[name] = {
+            name,
+            agent: command.agent,
+            model: command.model,
+            description: command.description,
+            source: "plugin",
+            get template() {
+              if (command.template) return command.template
+              if (!command.path) return ""
+              return ConfigMarkdown.parse(resolvePluginAsset(command.spec, command.path, command.dir))
+                .then((md) => md.content.trim())
+                .catch(() => "")
+            },
+            subtask: command.subtask,
+            hints: command.template ? hints(command.template) : [],
           }
         }
 
@@ -184,6 +208,7 @@ export namespace Command {
   export const defaultLayer = layer.pipe(
     Layer.provide(Config.defaultLayer),
     Layer.provide(MCP.defaultLayer),
+    Layer.provide(Plugin.defaultLayer),
     Layer.provide(Skill.defaultLayer),
   )
 

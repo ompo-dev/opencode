@@ -102,6 +102,29 @@ async function plugin(
   return p
 }
 
+async function manifestOnlyPlugin(dir: string) {
+  const p = path.join(dir, "manifest-only")
+  await fs.mkdir(p, { recursive: true })
+  await Bun.write(
+    path.join(p, "package.json"),
+    JSON.stringify({
+      name: "acme-manifest",
+      version: "1.0.0",
+    }),
+  )
+  await Bun.write(
+    path.join(p, "plugin.json"),
+    JSON.stringify({
+      skills: {
+        checks: {
+          path: "./skills/checks/SKILL.md",
+        },
+      },
+    }),
+  )
+  return p
+}
+
 async function read(file: string) {
   return Filesystem.readJson<{
     plugin?: unknown[]
@@ -109,6 +132,23 @@ async function read(file: string) {
 }
 
 describe("plugin.install.task", () => {
+  test("treats manifest-only plugins as server plugins during install", async () => {
+    await using tmp = await tmpdir()
+    const target = await manifestOnlyPlugin(tmp.path)
+    const run = createPlugTask(
+      {
+        mod: "acme-manifest@1.2.3",
+      },
+      deps(path.join(tmp.path, "global"), target),
+    )
+
+    const ok = await run(ctx(tmp.path))
+    expect(ok).toBe(true)
+
+    const server = await read(path.join(tmp.path, ".opencode", "opencode.jsonc"))
+    expect(server.plugin).toEqual(["acme-manifest@1.2.3"])
+  })
+
   test("writes both server and tui config entries", async () => {
     await using tmp = await tmpdir()
     const target = await plugin(tmp.path, ["server", "tui"])

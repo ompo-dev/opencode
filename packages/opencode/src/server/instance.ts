@@ -11,10 +11,12 @@ import { TuiRoutes } from "./routes/tui"
 import { Instance } from "../project/instance"
 import { Vcs } from "../project/vcs"
 import { Agent } from "../agent/agent"
+import { OutputStyle } from "../output-style"
 import { Skill } from "../skill"
 import { Global } from "../global"
 import { LSP } from "../lsp"
 import { Command } from "../command"
+import { Plugin } from "../plugin"
 import { Flag } from "../flag/flag"
 import { QuestionRoutes } from "./routes/question"
 import { PermissionRoutes } from "./routes/permission"
@@ -29,6 +31,7 @@ import { ExperimentalRoutes } from "./routes/experimental"
 import { ProviderRoutes } from "./routes/provider"
 import { EventRoutes } from "./routes/event"
 import { KanbanRoutes } from "./routes/kanban"
+import { WorkflowRoutes } from "./routes/workflow"
 import { errorHandler } from "./middleware"
 import { getMimeType } from "hono/utils/mime"
 import { OutlineRoutes } from "@opencode-ai/outline-server"
@@ -58,6 +61,7 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, app: Hono = new Hono()
     .route("/question", QuestionRoutes())
     .route("/provider", ProviderRoutes())
     .route("/kanban", KanbanRoutes())
+    .route("/workflow", WorkflowRoutes())
     .route(
       "/outline",
       OutlineRoutes(() => ({
@@ -496,6 +500,91 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, app: Hono = new Hono()
       async (c) => {
         const skills = await Skill.all()
         return c.json(skills)
+      },
+    )
+    .get(
+      "/output-style",
+      describeRoute({
+        summary: "List output styles",
+        description: "Get all available response output styles from built-ins and enabled plugins.",
+        operationId: "app.outputStyles",
+        responses: {
+          200: {
+            description: "List of output styles",
+            content: {
+              "application/json": {
+                schema: resolver(OutputStyle.Info.array()),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        return c.json(await OutputStyle.all())
+      },
+    )
+    .get(
+      "/output-style/active",
+      describeRoute({
+        summary: "Get active output style",
+        description: "Get the currently active response output style after plugin forcing and config selection.",
+        operationId: "app.outputStyle",
+        responses: {
+          200: {
+            description: "Active output style",
+            content: {
+              "application/json": {
+                schema: resolver(OutputStyle.Info.nullable()),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        return c.json((await OutputStyle.active()) ?? null)
+      },
+    )
+    .get(
+      "/plugin",
+      describeRoute({
+        summary: "List plugins",
+        description: "Get all loaded runtime plugins with merged manifest metadata.",
+        operationId: "app.plugins",
+        responses: {
+          200: {
+            description: "List of plugins",
+            content: {
+              "application/json": {
+                schema: resolver(Plugin.DescriptorInfo.array()),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        return c.json(await Plugin.plugins())
+      },
+    )
+    .get(
+      "/channel",
+      describeRoute({
+        summary: "List channels",
+        description: "Get plugin-defined channels available to the current runtime.",
+        operationId: "app.channels",
+        responses: {
+          200: {
+            description: "List of channels",
+            content: {
+              "application/json": {
+                schema: resolver(Plugin.ChannelInfo.array()),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        const reg = await Plugin.registry()
+        return c.json(Object.values(reg.channels))
       },
     )
     .get(

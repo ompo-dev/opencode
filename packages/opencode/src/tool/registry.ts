@@ -1,4 +1,4 @@
-import { PlanExitTool } from "./plan"
+import { PlanEnterTool, PlanExitTool } from "./plan"
 import { QuestionTool } from "./question"
 import { BashTool } from "./bash"
 import { KanbanTool } from "./kanban"
@@ -12,6 +12,8 @@ import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
 import { SkillDescription, SkillTool } from "./skill"
+import { SleepTool } from "./sleep"
+import { TaskMessageTool, TaskStatusTool, TaskWaitTool } from "./task-control"
 import { Tool } from "./tool"
 import { Config } from "../config/config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -25,6 +27,12 @@ import { Log } from "@/util/log"
 import { LspTool } from "./lsp"
 import { Truncate } from "./truncate"
 import { ApplyPatchTool } from "./apply_patch"
+import { McpAuthTool, McpListResourcesTool, McpReadResourceTool } from "./mcp"
+import { WorkflowCreateTool, WorkflowDeleteTool, WorkflowListTool, WorkflowTriggerTool } from "./workflow"
+import { SendMessageTool } from "./send-message"
+import { TeamListTool } from "./team"
+import { PowerShellTool } from "./powershell"
+import { ToolSearchTool } from "./search"
 import { Glob } from "../util/glob"
 import path from "path"
 import { pathToFileURL } from "url"
@@ -39,6 +47,7 @@ import { FileTime } from "../file/time"
 import { Instruction } from "../session/instruction"
 import { AppFileSystem } from "../filesystem"
 import { Agent } from "../agent/agent"
+import { MCP } from "../mcp"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -74,6 +83,7 @@ export namespace ToolRegistry {
     | Question.Service
     | Todo.Service
     | Agent.Service
+    | MCP.Service
     | LSP.Service
     | FileTime.Service
     | Instruction.Service
@@ -88,6 +98,18 @@ export namespace ToolRegistry {
       const read = yield* ReadTool
       const question = yield* QuestionTool
       const todo = yield* TodoWriteTool
+      const mcpAuth = yield* McpAuthTool
+      const mcpListResources = yield* McpListResourcesTool
+      const mcpReadResource = yield* McpReadResourceTool
+      const taskMessage = yield* TaskMessageTool
+      const workflowList = WorkflowListTool
+      const workflowCreate = WorkflowCreateTool
+      const workflowTrigger = WorkflowTriggerTool
+      const workflowDelete = WorkflowDeleteTool
+      const sendMessage = SendMessageTool
+      const teamList = TeamListTool
+      const powershell = PowerShellTool
+      const toolSearch = ToolSearchTool
 
       const state = yield* InstanceState.make<State>(
         Effect.fn("ToolRegistry.state")(function* (ctx) {
@@ -160,9 +182,25 @@ export namespace ToolRegistry {
             code: Tool.init(CodeSearchTool),
             skill: Tool.init(SkillTool),
             patch: Tool.init(ApplyPatchTool),
+            sleep: Tool.init(SleepTool),
             question: Tool.init(question),
             lsp: Tool.init(LspTool),
-            plan: Tool.init(PlanExitTool),
+            planEnter: Tool.init(PlanEnterTool),
+            planExit: Tool.init(PlanExitTool),
+            mcpAuth: Tool.init(mcpAuth),
+            mcpListResources: Tool.init(mcpListResources),
+            mcpReadResource: Tool.init(mcpReadResource),
+            taskStatus: Tool.init(TaskStatusTool),
+            taskWait: Tool.init(TaskWaitTool),
+            taskMessage: Tool.init(taskMessage),
+            workflowList: Tool.init(workflowList),
+            workflowCreate: Tool.init(workflowCreate),
+            workflowTrigger: Tool.init(workflowTrigger),
+            workflowDelete: Tool.init(workflowDelete),
+            sendMessage: Tool.init(sendMessage),
+            teamList: Tool.init(teamList),
+            powershell: Tool.init(powershell),
+            toolSearch: Tool.init(toolSearch),
           })
 
           return {
@@ -184,8 +222,25 @@ export namespace ToolRegistry {
               tool.code,
               tool.skill,
               tool.patch,
+              tool.sleep,
+              tool.mcpListResources,
+              tool.mcpReadResource,
+              tool.mcpAuth,
+              tool.taskStatus,
+              tool.taskWait,
+              tool.taskMessage,
+              tool.workflowList,
+              tool.workflowCreate,
+              tool.workflowTrigger,
+              tool.workflowDelete,
+              tool.sendMessage,
+              tool.teamList,
+              tool.toolSearch,
+              ...(process.platform === "win32" ? [tool.powershell] : []),
               ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
-              ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
+              ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli"
+                ? [tool.planEnter, tool.planExit]
+                : []),
             ],
             task: tool.task,
             read: tool.read,
@@ -261,6 +316,7 @@ export namespace ToolRegistry {
         Layer.provide(Question.defaultLayer),
         Layer.provide(Todo.defaultLayer),
         Layer.provide(Agent.defaultLayer),
+        Layer.provide(MCP.defaultLayer),
         Layer.provide(LSP.defaultLayer),
         Layer.provide(FileTime.defaultLayer),
         Layer.provide(Instruction.defaultLayer),
@@ -273,6 +329,10 @@ export namespace ToolRegistry {
 
   export async function ids() {
     return runPromise((svc) => svc.ids())
+  }
+
+  export async function all() {
+    return runPromise((svc) => svc.all())
   }
 
   export async function tools(input: {

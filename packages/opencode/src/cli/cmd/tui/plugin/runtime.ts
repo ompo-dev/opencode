@@ -20,9 +20,14 @@ import { errorData, errorMessage } from "@/util/error"
 import { isRecord } from "@/util/record"
 import { Instance } from "@/project/instance"
 import {
+  checkPluginPolicy,
+  pluginSource,
   readPackageThemes,
   readPluginId,
+  readPluginManifestFile,
+  readPluginPackage,
   readV1Plugin,
+  resolveMarketplaceSpec,
   resolvePluginId,
   type PluginPackage,
   type PluginSource,
@@ -839,7 +844,12 @@ async function installPluginBySpec(
     }
   }
 
-  const spec = raw.trim()
+  const requested = raw.trim()
+  const cfg = await Instance.provide({
+    directory: state.directory,
+    fn: () => Config.get(),
+  }).catch(() => undefined)
+  const spec = resolveMarketplaceSpec(requested, cfg?.plugins?.marketplaces)
   if (!spec) {
     return {
       ok: false,
@@ -870,13 +880,40 @@ async function installPluginBySpec(
     if (manifest.code === "manifest_no_targets") {
       return {
         ok: false,
-        message: `"${spec}" does not expose plugin entrypoints or oc-themes in package.json`,
+        message: `"${requested}" does not expose plugin entrypoints or oc-themes in package.json`,
       }
     }
 
     return {
       ok: false,
-      message: `Installed "${spec}" but failed to read ${manifest.file}`,
+      message: `Installed "${requested}" but failed to read ${manifest.file}`,
+    }
+  }
+
+  const policy = await Promise.resolve()
+    .then(async () => {
+      if (!cfg?.plugins?.policy) return { ok: true as const }
+      const pkg = await readPluginPackage(install.target)
+      const manifest = await readPluginManifestFile(install.target, pkg).catch(() => undefined)
+      const source = pluginSource(spec)
+      const raw = readPluginId(manifest?.id ?? manifest?.name, spec)
+      const id = raw ? await resolvePluginId(source, spec, install.target, raw, pkg) : undefined
+      const hit = checkPluginPolicy(cfg.plugins.policy, {
+        spec,
+        id,
+        target: install.target,
+        pkg,
+      })
+      return hit
+    })
+    .catch((error: unknown) => ({
+      ok: false as const,
+      reason: errorMessage(error),
+    }))
+  if (!policy.ok) {
+    return {
+      ok: false,
+      message: policy.reason,
     }
   }
 
@@ -992,6 +1029,7 @@ export namespace TuiPluginRuntime {
       directory: cwd,
       fn: async () => {
         const config = await TuiConfig.get()
+        const cfg = await Config.get().catch(() => undefined)
         const records = Flag.OPENCODE_PURE ? [] : (config.plugin_origins ?? [])
         if (Flag.OPENCODE_PURE && config.plugin_origins?.length) {
           log.info("skipping external tui plugins in pure mode", { count: config.plugin_origins.length })
@@ -1012,7 +1050,17 @@ export namespace TuiPluginRuntime {
         }
 
         const ready = await resolveExternalPlugins(records, () => TuiConfig.waitForDependencies())
-        await addExternalPluginEntries(next, ready)
+        const allowed = ready.filter((item) => {
+          const hit = checkPluginPolicy(cfg?.plugins?.policy, {
+            spec: item.spec,
+            id: item.id,
+            target: item.target,
+          })
+          if (hit.ok) return true
+          warn("tui plugin blocked by policy", { path: item.spec, reason: hit.reason })
+          return false
+        })
+        await addExternalPluginEntries(next, allowed)
 
         applyInitialPluginEnabledState(next, config)
         for (const plugin of next.plugins) {

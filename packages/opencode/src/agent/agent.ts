@@ -1,4 +1,5 @@
 import { Config } from "../config/config"
+import { ConfigMarkdown } from "../config/markdown"
 import z from "zod"
 import { Provider } from "../provider/provider"
 import { ModelID, ProviderID } from "../provider/schema"
@@ -19,6 +20,7 @@ import { Global } from "@/global"
 import path from "path"
 import { Plugin } from "@/plugin"
 import { Skill } from "../skill"
+import { resolvePluginAsset } from "../plugin/shared"
 import { Effect, ServiceMap, Layer } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
@@ -74,12 +76,14 @@ export namespace Agent {
     Effect.gen(function* () {
       const config = yield* Config.Service
       const auth = yield* Auth.Service
+      const plugin = yield* Plugin.Service
       const skill = yield* Skill.Service
       const provider = yield* Provider.Service
 
-      const state = yield* InstanceState.make<State>(
-        Effect.fn("Agent.state")(function* (ctx) {
+      const state = yield* InstanceState.make<State>((ctx) =>
+        Effect.gen(function* () {
           const cfg = yield* config.get()
+          const reg = yield* plugin.registry()
           const skillDirs = yield* skill.dirs()
           const whitelistedDirs = [Truncate.GLOB, ...skillDirs.map((dir) => path.join(dir, "*"))]
 
@@ -233,6 +237,47 @@ export namespace Agent {
             },
           }
 
+          for (const [key, value] of Object.entries(reg.agents)) {
+            let item = agents[key]
+            if (!item) {
+              item = agents[key] = {
+                name: key,
+                mode: value.mode ?? "all",
+                permission: Permission.merge(defaults, user),
+                options: {},
+                native: false,
+              }
+            }
+            if (value.model) item.model = Provider.parseModel(value.model)
+            item.variant = value.variant ?? item.variant
+            const file = value.path
+            const prompt =
+              file && !value.prompt
+                ? yield* Effect.promise(() =>
+                    ConfigMarkdown.parse(resolvePluginAsset(value.spec, file, value.dir)).then((md) =>
+                      md.content.trim(),
+                    ),
+                  ).pipe(Effect.catch(() => Effect.succeed(undefined)))
+                : undefined
+            item.prompt =
+              value.prompt ??
+              prompt ??
+              item.prompt
+            item.description = value.description ?? item.description
+            item.temperature = value.temperature ?? item.temperature
+            item.topP = value.top_p ?? item.topP
+            item.mode = value.mode ?? item.mode
+            item.color = value.color ?? item.color
+            item.hidden = value.hidden ?? item.hidden
+            item.name = value.name ?? item.name
+            item.steps = value.steps ?? item.steps
+            item.options = mergeDeep(item.options, value.options ?? {})
+            item.permission = Permission.merge(
+              item.permission,
+              Permission.fromConfig(Config.Permission.catch({}).parse(value.permission ?? {})),
+            )
+          }
+
           for (const [key, value] of Object.entries(cfg.agent ?? {})) {
             if (value.disable) {
               delete agents[key]
@@ -313,7 +358,7 @@ export namespace Agent {
             list,
             defaultAgent,
           } satisfies State
-        }),
+        }).pipe(Effect.orDie),
       )
 
       return Service.of({
@@ -403,6 +448,7 @@ export namespace Agent {
       Layer.provide(Provider.defaultLayer),
       Layer.provide(Auth.defaultLayer),
       Layer.provide(Config.defaultLayer),
+      Layer.provide(Plugin.defaultLayer),
       Layer.provide(Skill.defaultLayer),
     ),
   )

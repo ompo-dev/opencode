@@ -14,6 +14,7 @@ import { spawn as lspspawn } from "./launch"
 import { Effect, Layer, ServiceMap } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
+import { Plugin } from "../plugin"
 
 export namespace LSP {
   const log = Log.create({ service: "lsp" })
@@ -139,6 +140,12 @@ export namespace LSP {
     spawning: Map<string, Promise<LSPClient.Info | undefined>>
   }
 
+  function valid(name: string, item: Config.LspServer) {
+    if ("disabled" in item && item.disabled) return true
+    if (Object.values(LSPServer).some((server) => server.id === name)) return true
+    return Boolean(item.extensions?.length)
+  }
+
   export interface Interface {
     readonly init: () => Effect.Effect<void>
     readonly status: () => Effect.Effect<Status[]>
@@ -162,14 +169,40 @@ export namespace LSP {
     Service,
     Effect.gen(function* () {
       const config = yield* Config.Service
+      const plugin = yield* Plugin.Service
+
+      const configured = Effect.fn("LSP.configured")(function* () {
+        const cfg = yield* config.get()
+        if (cfg.lsp === false) return false as const
+        const reg = yield* plugin.registry()
+        const out = { ...(cfg.lsp ?? {}) } satisfies Record<string, Config.LspServer>
+
+        for (const [name, item] of Object.entries(reg.lspServers)) {
+          const raw = Object.fromEntries(
+            Object.entries(item).filter(([key]) => !["id", "key", "plugin", "dir", "spec"].includes(key)),
+          )
+          const parsed = Config.LspServer.safeParse(raw)
+          if (!parsed.success) {
+            log.error("ignoring invalid plugin lsp config", { name, plugin: item.plugin })
+            continue
+          }
+          if (!valid(name, parsed.data)) {
+            log.error("ignoring plugin lsp config without extensions", { name, plugin: item.plugin })
+            continue
+          }
+          out[name] = parsed.data
+        }
+
+        return out
+      })
 
       const state = yield* InstanceState.make<State>(
         Effect.fn("LSP.state")(function* () {
-          const cfg = yield* config.get()
+          const cfg = yield* configured()
 
           const servers: Record<string, LSPServer.Info> = {}
 
-          if (cfg.lsp === false) {
+          if (cfg === false) {
             log.info("all LSPs are disabled")
           } else {
             for (const server of Object.values(LSPServer)) {
@@ -178,7 +211,7 @@ export namespace LSP {
 
             filterExperimentalServers(servers)
 
-            for (const [name, item] of Object.entries(cfg.lsp ?? {})) {
+            for (const [name, item] of Object.entries(cfg)) {
               const existing = servers[name]
               if (item.disabled) {
                 log.info(`LSP server ${name} is disabled`)
@@ -506,7 +539,9 @@ export namespace LSP {
     }),
   )
 
-  export const defaultLayer = layer.pipe(Layer.provide(Config.defaultLayer))
+  export const defaultLayer = Layer.suspend(() =>
+    layer.pipe(Layer.provide(Config.defaultLayer), Layer.provide(Plugin.defaultLayer)),
+  )
 
   const { runPromise } = makeRuntime(Service, defaultLayer)
 

@@ -35,6 +35,9 @@ import { JsonMigration } from "./storage/json-migration"
 import { Database } from "./storage/db"
 import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
+import { OutputStyleCommand } from "./cli/cmd/output-style"
+import { ChannelCommand } from "./cli/cmd/channel"
+import { WorkflowCommand } from "./cli/cmd/workflow"
 import { Heap } from "./cli/heap"
 import { drizzle } from "drizzle-orm/bun-sqlite"
 
@@ -170,6 +173,9 @@ const cli = yargs(args)
   .command(PrCommand)
   .command(SessionCommand)
   .command(PluginCommand)
+  .command(OutputStyleCommand)
+  .command(ChannelCommand)
+  .command(WorkflowCommand)
   .command(DbCommand)
   .fail((msg, err) => {
     if (

@@ -6,6 +6,7 @@ export namespace Identifier {
     event: "evt",
     session: "ses",
     message: "msg",
+    workflow: "wfl",
     column: "col",
     card: "crd",
     tag: "tag",

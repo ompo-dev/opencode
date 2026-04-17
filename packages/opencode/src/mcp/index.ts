@@ -3,6 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
+import { WebSocketClientTransport } from "@modelcontextprotocol/sdk/client/websocket.js"
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
 import {
   CallToolResultSchema,
@@ -23,6 +24,7 @@ import { McpAuth } from "./auth"
 import { BusEvent } from "../bus/bus-event"
 import { Bus } from "@/bus"
 import { TuiEvent } from "@/cli/cmd/tui/event"
+import { Plugin } from "@/plugin"
 import open from "open"
 import { Effect, Exit, Layer, Option, ServiceMap, Stream } from "effect"
 import { InstanceState } from "@/effect/instance-state"
@@ -117,11 +119,15 @@ export namespace MCP {
   // Store transports for OAuth servers to allow finishing auth
   type TransportWithAuth = StreamableHTTPClientTransport | SSEClientTransport
   const pendingOAuthTransports = new Map<string, TransportWithAuth>()
+  export type SDKFactory = MCPClient | (() => MCPClient | Promise<MCPClient>)
+  const sdkClients = new Map<string, SDKFactory>()
 
   // Prompt cache types
   type PromptInfo = Awaited<ReturnType<MCPClient["listPrompts"]>>["prompts"][number]
   type ResourceInfo = Awaited<ReturnType<MCPClient["listResources"]>>["resources"][number]
   type McpEntry = NonNullable<Config.Info["mcp"]>[string]
+  type LocalMcp = Extract<Config.Mcp, { type: "local" | "stdio" }>
+  type RemoteMcp = Extract<Config.Mcp, { type: "remote" | "http" | "sse" | "ws" }>
 
   function isMcpConfigured(entry: McpEntry): entry is Config.Mcp {
     return typeof entry === "object" && entry !== null && "type" in entry
@@ -214,6 +220,7 @@ export namespace MCP {
 
   export interface Interface {
     readonly status: () => Effect.Effect<Record<string, Status>>
+    readonly configured: () => Effect.Effect<Record<string, Config.Mcp>>
     readonly clients: () => Effect.Effect<Record<string, MCPClient>>
     readonly tools: () => Effect.Effect<Record<string, Tool>>
     readonly prompts: () => Effect.Effect<Record<string, PromptInfo & { client: string }>>
@@ -247,8 +254,13 @@ export namespace MCP {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const auth = yield* McpAuth.Service
       const bus = yield* Bus.Service
+      const plugin = yield* Plugin.Service
 
-      type Transport = StdioClientTransport | StreamableHTTPClientTransport | SSEClientTransport
+      type Transport =
+        | StdioClientTransport
+        | StreamableHTTPClientTransport
+        | SSEClientTransport
+        | WebSocketClientTransport
 
       /**
        * Connect a client via the given transport with resource safety:
@@ -270,10 +282,42 @@ export namespace MCP {
 
       const DISABLED_RESULT: CreateResult = { status: { status: "disabled" } }
 
-      const connectRemote = Effect.fn("MCP.connectRemote")(function* (
-        key: string,
-        mcp: Config.Mcp & { type: "remote" },
-      ) {
+      const connectRemote = Effect.fn("MCP.connectRemote")(function* (key: string, mcp: RemoteMcp) {
+        if (mcp.type === "ws") {
+          if (mcp.oauth !== false && mcp.oauth !== undefined) {
+            return {
+              client: undefined,
+              status: {
+                status: "failed" as const,
+                error: "WebSocket MCP transport does not support OAuth in opencode",
+              },
+            }
+          }
+
+          if (Object.keys(mcp.headers ?? {}).length > 0) {
+            return {
+              client: undefined,
+              status: {
+                status: "failed" as const,
+                error: "WebSocket MCP transport does not support custom headers in opencode",
+              },
+            }
+          }
+
+          const connectTimeout = mcp.timeout ?? DEFAULT_TIMEOUT
+          return yield* connectTransport(new WebSocketClientTransport(new URL(mcp.url)), connectTimeout).pipe(
+            Effect.map((client): { client: MCPClient | undefined; status: Status } => ({
+              client,
+              status: { status: "connected" },
+            })),
+            Effect.catch((error): Effect.Effect<{ client: MCPClient | undefined; status: Status }> => {
+              const msg = error instanceof Error ? error.message : String(error)
+              log.error("websocket mcp startup failed", { key, url: mcp.url, error: msg })
+              return Effect.succeed({ client: undefined, status: { status: "failed", error: msg } })
+            }),
+          )
+        }
+
         const oauthDisabled = mcp.oauth === false
         const oauthConfig = typeof mcp.oauth === "object" ? mcp.oauth : undefined
         let authProvider: McpOAuthProvider | undefined
@@ -296,22 +340,43 @@ export namespace MCP {
           )
         }
 
-        const transports: Array<{ name: string; transport: TransportWithAuth }> = [
-          {
-            name: "StreamableHTTP",
-            transport: new StreamableHTTPClientTransport(new URL(mcp.url), {
-              authProvider,
-              requestInit: mcp.headers ? { headers: mcp.headers } : undefined,
-            }),
-          },
-          {
-            name: "SSE",
-            transport: new SSEClientTransport(new URL(mcp.url), {
-              authProvider,
-              requestInit: mcp.headers ? { headers: mcp.headers } : undefined,
-            }),
-          },
-        ]
+        const transports =
+          mcp.type === "http"
+            ? [
+                {
+                  name: "StreamableHTTP",
+                  transport: new StreamableHTTPClientTransport(new URL(mcp.url), {
+                    authProvider,
+                    requestInit: mcp.headers ? { headers: mcp.headers } : undefined,
+                  }),
+                },
+              ]
+            : mcp.type === "sse"
+              ? [
+                  {
+                    name: "SSE",
+                    transport: new SSEClientTransport(new URL(mcp.url), {
+                      authProvider,
+                      requestInit: mcp.headers ? { headers: mcp.headers } : undefined,
+                    }),
+                  },
+                ]
+              : [
+                  {
+                    name: "StreamableHTTP",
+                    transport: new StreamableHTTPClientTransport(new URL(mcp.url), {
+                      authProvider,
+                      requestInit: mcp.headers ? { headers: mcp.headers } : undefined,
+                    }),
+                  },
+                  {
+                    name: "SSE",
+                    transport: new SSEClientTransport(new URL(mcp.url), {
+                      authProvider,
+                      requestInit: mcp.headers ? { headers: mcp.headers } : undefined,
+                    }),
+                  },
+                ]
 
         const connectTimeout = mcp.timeout ?? DEFAULT_TIMEOUT
         let lastStatus: Status | undefined
@@ -378,7 +443,7 @@ export namespace MCP {
         }
       })
 
-      const connectLocal = Effect.fn("MCP.connectLocal")(function* (key: string, mcp: Config.Mcp & { type: "local" }) {
+      const connectLocal = Effect.fn("MCP.connectLocal")(function* (key: string, mcp: LocalMcp) {
         const [cmd, ...args] = mcp.command
         const cwd = Instance.directory
         const transport = new StdioClientTransport({
@@ -416,12 +481,54 @@ export namespace MCP {
           return DISABLED_RESULT
         }
 
+        if (mcp.type === "sdk") {
+          const ref = mcp.client?.trim() || key
+          const item = sdkClients.get(ref)
+          if (!item) {
+            return {
+              status: {
+                status: "failed",
+                error: `SDK MCP client "${ref}" is not registered`,
+              },
+            } satisfies CreateResult
+          }
+
+          const mcpClient = yield* Effect.tryPromise({
+            try: async () => (typeof item === "function" ? await item() : item),
+            catch: (error) => error,
+          }).pipe(
+            Effect.catch((error) =>
+              Effect.succeed(undefined as MCPClient | undefined).pipe(
+                Effect.tap(() => Effect.sync(() => log.error("sdk mcp startup failed", { key, client: ref, error }))),
+              ),
+            ),
+          )
+
+          if (!mcpClient) {
+            return {
+              status: {
+                status: "failed",
+                error: `Failed to start SDK MCP client "${ref}"`,
+              },
+            } satisfies CreateResult
+          }
+
+          const listed = yield* defs(key, mcpClient, mcp.timeout)
+          if (!listed) {
+            yield* Effect.tryPromise(() => mcpClient.close()).pipe(Effect.ignore)
+            return { status: { status: "failed", error: "Failed to get tools" } } satisfies CreateResult
+          }
+
+          log.info("connected sdk mcp client", { key, client: ref })
+          return { mcpClient, status: { status: "connected" }, defs: listed } satisfies CreateResult
+        }
+
         log.info("found", { key, type: mcp.type })
 
         const { client: mcpClient, status } =
-          mcp.type === "remote"
-            ? yield* connectRemote(key, mcp as Config.Mcp & { type: "remote" })
-            : yield* connectLocal(key, mcp as Config.Mcp & { type: "local" })
+          mcp.type === "local" || mcp.type === "stdio"
+            ? yield* connectLocal(key, mcp)
+            : yield* connectRemote(key, mcp)
 
         if (!mcpClient) {
           return { status } satisfies CreateResult
@@ -437,6 +544,31 @@ export namespace MCP {
         return { mcpClient, status, defs: listed } satisfies CreateResult
       })
       const cfgSvc = yield* Config.Service
+
+      const configured = Effect.fn("MCP.configured")(function* () {
+        const cfg = yield* cfgSvc.get()
+        const reg = yield* plugin.registry()
+        const out = {} as Record<string, Config.Mcp>
+
+        for (const [name, item] of Object.entries(cfg.mcp ?? {})) {
+          if (!isMcpConfigured(item)) continue
+          out[name] = item
+        }
+
+        for (const [name, item] of Object.entries(reg.mcpServers)) {
+          const raw = item.config
+            ? { ...item.config, ...(item.enabled === undefined ? {} : { enabled: item.enabled }) }
+            : item
+          const parsed = Config.Mcp.safeParse(raw)
+          if (!parsed.success) {
+            log.error("ignoring invalid plugin mcp config", { name, plugin: item.plugin })
+            continue
+          }
+          out[name] = parsed.data
+        }
+
+        return out
+      })
 
       const descendants = Effect.fnUntraced(
         function* (pid: number) {
@@ -478,10 +610,9 @@ export namespace MCP {
         })
       }
 
-      const state = yield* InstanceState.make<State>(
-        Effect.fn("MCP.state")(function* () {
-          const cfg = yield* cfgSvc.get()
-          const config = cfg.mcp ?? {}
+      const state = yield* InstanceState.make<State>(() =>
+        Effect.gen(function* () {
+          const config = yield* configured()
           const s: State = {
             status: {},
             clients: {},
@@ -539,7 +670,7 @@ export namespace MCP {
           )
 
           return s
-        }),
+        }).pipe(Effect.orDie),
       )
 
       function closeClient(s: State, name: string) {
@@ -551,9 +682,7 @@ export namespace MCP {
 
       const status = Effect.fn("MCP.status")(function* () {
         const s = yield* InstanceState.get(state)
-
-        const cfg = yield* cfgSvc.get()
-        const config = cfg.mcp ?? {}
+        const config = yield* configured()
         const result: Record<string, Status> = {}
 
         for (const [key, mcp] of Object.entries(config)) {
@@ -614,7 +743,7 @@ export namespace MCP {
         const s = yield* InstanceState.get(state)
 
         const cfg = yield* cfgSvc.get()
-        const config = cfg.mcp ?? {}
+        const config = yield* configured()
         const defaultTimeout = cfg.experimental?.mcp_timeout
 
         const connectedClients = Object.entries(s.clients).filter(
@@ -705,8 +834,7 @@ export namespace MCP {
       })
 
       const getMcpConfig = Effect.fnUntraced(function* (mcpName: string) {
-        const cfg = yield* cfgSvc.get()
-        const mcpConfig = cfg.mcp?.[mcpName]
+        const mcpConfig = (yield* configured())[mcpName]
         if (!mcpConfig || !isMcpConfigured(mcpConfig)) return undefined
         return mcpConfig
       })
@@ -714,7 +842,14 @@ export namespace MCP {
       const startAuth = Effect.fn("MCP.startAuth")(function* (mcpName: string) {
         const mcpConfig = yield* getMcpConfig(mcpName)
         if (!mcpConfig) throw new Error(`MCP server ${mcpName} not found or disabled`)
-        if (mcpConfig.type !== "remote") throw new Error(`MCP server ${mcpName} is not a remote server`)
+        if (
+          mcpConfig.type === "local" ||
+          mcpConfig.type === "stdio" ||
+          mcpConfig.type === "sdk" ||
+          mcpConfig.type === "ws"
+        ) {
+          throw new Error(`MCP server ${mcpName} is not a remote server`)
+        }
         if (mcpConfig.oauth === false) throw new Error(`MCP server ${mcpName} has OAuth explicitly disabled`)
 
         // OAuth config is optional - if not provided, we'll use auto-discovery
@@ -744,7 +879,16 @@ export namespace MCP {
           },
         )
 
-        const transport = new StreamableHTTPClientTransport(new URL(mcpConfig.url), { authProvider })
+        const transport =
+          mcpConfig.type === "sse"
+            ? new SSEClientTransport(new URL(mcpConfig.url), {
+                authProvider,
+                requestInit: mcpConfig.headers ? { headers: mcpConfig.headers } : undefined,
+              })
+            : new StreamableHTTPClientTransport(new URL(mcpConfig.url), {
+                authProvider,
+                requestInit: mcpConfig.headers ? { headers: mcpConfig.headers } : undefined,
+              })
 
         return yield* Effect.tryPromise({
           try: () => {
@@ -839,7 +983,13 @@ export namespace MCP {
       const supportsOAuth = Effect.fn("MCP.supportsOAuth")(function* (mcpName: string) {
         const mcpConfig = yield* getMcpConfig(mcpName)
         if (!mcpConfig) return false
-        return mcpConfig.type === "remote" && mcpConfig.oauth !== false
+        return (
+          mcpConfig.type !== "local" &&
+          mcpConfig.type !== "stdio" &&
+          mcpConfig.type !== "sdk" &&
+          mcpConfig.type !== "ws" &&
+          mcpConfig.oauth !== false
+        )
       })
 
       const hasStoredTokens = Effect.fn("MCP.hasStoredTokens")(function* (mcpName: string) {
@@ -856,6 +1006,7 @@ export namespace MCP {
 
       return Service.of({
         status,
+        configured,
         clients,
         tools,
         prompts,
@@ -884,6 +1035,7 @@ export namespace MCP {
     Layer.provide(McpAuth.layer),
     Layer.provide(Bus.layer),
     Layer.provide(Config.defaultLayer),
+    Layer.provide(Plugin.defaultLayer),
     Layer.provide(CrossSpawnSpawner.defaultLayer),
     Layer.provide(AppFileSystem.defaultLayer),
   )
@@ -893,6 +1045,8 @@ export namespace MCP {
   // --- Async facade functions ---
 
   export const status = async () => runPromise((svc) => svc.status())
+
+  export const configured = async () => runPromise((svc) => svc.configured())
 
   export const tools = async () => runPromise((svc) => svc.tools())
 
@@ -905,6 +1059,12 @@ export namespace MCP {
   export const connect = async (name: string) => runPromise((svc) => svc.connect(name))
 
   export const disconnect = async (name: string) => runPromise((svc) => svc.disconnect(name))
+
+  export const getPrompt = async (clientName: string, name: string, args?: Record<string, string>) =>
+    runPromise((svc) => svc.getPrompt(clientName, name, args))
+
+  export const readResource = async (clientName: string, resourceUri: string) =>
+    runPromise((svc) => svc.readResource(clientName, resourceUri))
 
   export const startAuth = async (mcpName: string) => runPromise((svc) => svc.startAuth(mcpName))
 
@@ -920,4 +1080,11 @@ export namespace MCP {
   export const hasStoredTokens = async (mcpName: string) => runPromise((svc) => svc.hasStoredTokens(mcpName))
 
   export const getAuthStatus = async (mcpName: string) => runPromise((svc) => svc.getAuthStatus(mcpName))
+
+  export function registerClient(name: string, item: SDKFactory) {
+    sdkClients.set(name, item)
+    return () => {
+      if (sdkClients.get(name) === item) sdkClients.delete(name)
+    }
+  }
 }

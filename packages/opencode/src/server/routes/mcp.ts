@@ -6,6 +6,23 @@ import { Config } from "../../config/config"
 import { errors } from "../error"
 import { lazy } from "../../util/lazy"
 
+const Prompt = z
+  .object({
+    client: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+  })
+  .catchall(z.unknown())
+
+const Resource = z
+  .object({
+    client: z.string(),
+    name: z.string(),
+    uri: z.string(),
+    description: z.string().optional(),
+  })
+  .catchall(z.unknown())
+
 export const McpRoutes = lazy(() =>
   new Hono()
     .get(
@@ -27,6 +44,117 @@ export const McpRoutes = lazy(() =>
       }),
       async (c) => {
         return c.json(await MCP.status())
+      },
+    )
+    .get(
+      "/prompts",
+      describeRoute({
+        summary: "List MCP prompts",
+        description: "List prompts exposed by connected Model Context Protocol (MCP) servers.",
+        operationId: "mcp.prompts",
+        responses: {
+          200: {
+            description: "MCP prompt list",
+            content: {
+              "application/json": {
+                schema: resolver(z.record(z.string(), Prompt)),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        return c.json(await MCP.prompts())
+      },
+    )
+    .get(
+      "/resources",
+      describeRoute({
+        summary: "List MCP resources",
+        description: "List resources exposed by connected Model Context Protocol (MCP) servers.",
+        operationId: "mcp.resources",
+        responses: {
+          200: {
+            description: "MCP resource list",
+            content: {
+              "application/json": {
+                schema: resolver(z.record(z.string(), Resource)),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        return c.json(await MCP.resources())
+      },
+    )
+    .post(
+      "/prompt",
+      describeRoute({
+        summary: "Read MCP prompt",
+        description: "Fetch a prompt definition from a connected Model Context Protocol (MCP) server.",
+        operationId: "mcp.prompt.get",
+        responses: {
+          200: {
+            description: "MCP prompt",
+            content: {
+              "application/json": {
+                schema: resolver(z.unknown()),
+              },
+            },
+          },
+          ...errors(404),
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          client: z.string(),
+          name: z.string(),
+          args: z.record(z.string(), z.string()).optional(),
+        }),
+      ),
+      async (c) => {
+        const { client, name, args } = c.req.valid("json")
+        const result = await MCP.getPrompt(client, name, args)
+        if (!result) {
+          return c.json({ error: `MCP prompt ${name} not found for ${client}` }, 404)
+        }
+        return c.json(result)
+      },
+    )
+    .post(
+      "/resource",
+      describeRoute({
+        summary: "Read MCP resource",
+        description: "Read a resource from a connected Model Context Protocol (MCP) server.",
+        operationId: "mcp.resource.read",
+        responses: {
+          200: {
+            description: "MCP resource content",
+            content: {
+              "application/json": {
+                schema: resolver(z.unknown()),
+              },
+            },
+          },
+          ...errors(404),
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          client: z.string(),
+          uri: z.string(),
+        }),
+      ),
+      async (c) => {
+        const { client, uri } = c.req.valid("json")
+        const result = await MCP.readResource(client, uri)
+        if (!result) {
+          return c.json({ error: `MCP resource ${uri} not found for ${client}` }, 404)
+        }
+        return c.json(result)
       },
     )
     .post(

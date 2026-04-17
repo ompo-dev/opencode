@@ -1,16 +1,25 @@
 import { intro, log, outro, spinner } from "@clack/prompts"
 import type { Argv } from "yargs"
 
+import { Config } from "../../config/config"
 import { ConfigPaths } from "../../config/paths"
 import { Global } from "../../global"
 import { installPlugin, patchPluginConfig, readPluginManifest } from "../../plugin/install"
-import { resolvePluginTarget } from "../../plugin/shared"
+import {
+  checkPluginPolicy,
+  readPluginId,
+  readPluginManifestFile,
+  readPluginPackage,
+  resolveMarketplaceSpec,
+  resolvePluginTarget,
+} from "../../plugin/shared"
 import { Instance } from "../../project/instance"
 import { errorMessage } from "../../util/error"
 import { Filesystem } from "../../util/filesystem"
 import { Process } from "../../util/process"
 import { UI } from "../ui"
 import { cmd } from "./cmd"
+import { Plugin } from "../../plugin"
 
 type Spin = {
   start: (msg: string) => void
@@ -68,11 +77,16 @@ function cause(err: unknown) {
 }
 
 export function createPlugTask(input: PlugInput, dep: PlugDeps = defaultPlugDeps) {
-  const mod = input.mod
   const force = Boolean(input.force)
   const global = Boolean(input.global)
 
   return async (ctx: PlugCtx) => {
+    const cfg = await Config.get().catch(() => undefined)
+    const mod = resolveMarketplaceSpec(input.mod, cfg?.plugins?.marketplaces)
+    if (mod !== input.mod) {
+      dep.log.info(`Resolved ${input.mod} -> ${mod}`)
+    }
+
     const install = dep.spinner()
     install.start("Installing plugin package...")
     const target = await installPlugin(mod, dep)
@@ -129,6 +143,29 @@ export function createPlugTask(input: PlugInput, dep: PlugDeps = defaultPlugDeps
       `Detected ${manifest.targets.map((item) => item.kind).join(" + ")} target${manifest.targets.length === 1 ? "" : "s"}`,
     )
 
+    const policy = await Promise.resolve()
+      .then(async () => {
+        if (!cfg?.plugins?.policy) return { ok: true as const }
+        const pkg = await readPluginPackage(target.target).catch(() => undefined)
+        const data = await readPluginManifestFile(target.target, pkg).catch(() => undefined)
+        const id = readPluginId(data?.id ?? data?.name ?? pkg?.json.name, mod)
+        return checkPluginPolicy(cfg.plugins.policy, {
+          spec: mod,
+          id,
+          target: target.target,
+          pkg,
+        })
+      })
+      .catch((error: unknown) => ({
+        ok: false as const,
+        reason: errorMessage(error),
+      }))
+
+    if (!policy.ok) {
+      dep.log.error(policy.reason)
+      return false
+    }
+
     const patch = dep.spinner()
     patch.start("Updating plugin config...")
     const out = await patchPluginConfig(
@@ -175,12 +212,31 @@ export function createPlugTask(input: PlugInput, dep: PlugDeps = defaultPlugDeps
   }
 }
 
+const PluginListCommand = cmd({
+  command: "list",
+  aliases: ["ls"],
+  describe: "list loaded runtime plugins",
+  async handler() {
+    await Instance.provide({
+      directory: process.cwd(),
+      async fn() {
+        const list = await Plugin.plugins()
+        for (const item of list.toSorted((a, b) => a.id.localeCompare(b.id))) {
+          process.stdout.write(`${item.id} (${item.source}, ${item.scope})` + "\n")
+          process.stdout.write(`  ${item.spec}` + "\n")
+        }
+      },
+    })
+  },
+})
+
 export const PluginCommand = cmd({
-  command: "plugin <module>",
+  command: "plugin [module]",
   aliases: ["plug"],
-  describe: "install plugin and update config",
+  describe: "install plugins and inspect loaded runtime plugins",
   builder: (yargs: Argv) => {
     return yargs
+      .command(PluginListCommand)
       .positional("module", {
         type: "string",
         describe: "npm module name",

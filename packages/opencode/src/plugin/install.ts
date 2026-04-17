@@ -13,7 +13,7 @@ import { Filesystem } from "@/util/filesystem"
 import { Flock } from "@/util/flock"
 import { isRecord } from "@/util/record"
 
-import { parsePluginSpecifier, readPackageThemes, readPluginPackage, resolvePluginTarget } from "./shared"
+import { parsePluginSpecifier, readPackageThemes, readPluginManifestFile, readPluginPackage, resolvePluginTarget } from "./shared"
 
 type Mode = "noop" | "add" | "replace"
 type Kind = "server" | "tui"
@@ -165,6 +165,22 @@ function packageTargets(pkg: { json: Record<string, unknown>; dir: string; pkg: 
   return targets
 }
 
+function manifestTargets(manifest: Awaited<ReturnType<typeof readPluginManifestFile>>) {
+  if (!manifest) return []
+  const server =
+    Object.keys(manifest.commands ?? {}).length > 0 ||
+    Object.keys(manifest.agents ?? {}).length > 0 ||
+    Object.keys(manifest.skills ?? {}).length > 0 ||
+    Object.keys(manifest.mcpServers ?? {}).length > 0 ||
+    Object.keys(manifest.lspServers ?? {}).length > 0 ||
+    Object.keys(manifest.outputStyles ?? {}).length > 0 ||
+    Object.keys(manifest.channels ?? {}).length > 0 ||
+    Object.keys(manifest.userConfig ?? {}).length > 0 ||
+    (manifest.hooks?.length ?? 0) > 0
+
+  return server ? ([{ kind: "server" }] satisfies Target[]) : []
+}
+
 function patch(text: string, path: Array<string | number>, value: unknown, insert = false) {
   return applyEdits(
     text,
@@ -301,7 +317,12 @@ export async function readPluginManifest(target: string): Promise<ManifestResult
   }
 
   const targets = await Promise.resolve()
-    .then(() => packageTargets(pkg.item))
+    .then(async () => {
+      const manifest = await readPluginManifestFile(target, pkg.item).catch(() => undefined)
+      return [...packageTargets(pkg.item), ...manifestTargets(manifest)].filter(
+        (item, i, arr) => arr.findIndex((row) => row.kind === item.kind) === i,
+      )
+    })
     .then(
       (item) => ({ ok: true as const, item }),
       (error: unknown) => ({ ok: false as const, error }),

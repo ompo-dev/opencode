@@ -1,4 +1,8 @@
 import type { Hooks, PluginInput, Plugin as PluginInstance, PluginModule } from "@opencode-ai/plugin"
+import path from "path"
+import { mkdir } from "fs/promises"
+import semver from "semver"
+import z from "zod"
 import { Config } from "../config/config"
 import { Bus } from "../bus"
 import { Log } from "../util/log"
@@ -16,15 +20,111 @@ import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 import { errorMessage } from "@/util/error"
 import { PluginLoader } from "./loader"
-import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
+import {
+  checkPluginPolicy,
+  parsePluginSpecifier,
+  PluginManifest,
+  pluginKeys,
+  pluginStorage,
+  readPluginId,
+  readPluginManifestFile,
+  readPluginModuleManifest,
+  readV1Plugin,
+  resolvePluginId,
+  resolvePluginRoot,
+} from "./shared"
 import { createOutlinePlugin } from "@opencode-ai/outline-server"
 import { Global } from "../global"
+import { mergeDeep } from "remeda"
+import { isRecord } from "@/util/record"
+import { PluginMeta } from "./meta"
 
 export namespace Plugin {
   const log = Log.create({ service: "plugin" })
 
+  type Base = {
+    id: string
+    key: string
+    plugin: string
+    dir: string
+    spec: string
+  }
+
+  export type Descriptor = {
+    id: string
+    spec: string
+    version?: string
+    keys: string[]
+    source: "file" | "npm"
+    target: string
+    dir: string
+    scope: Config.PluginScope
+    options?: Config.PluginOptions
+    manifest?: PluginManifest
+    dataDir: string
+    cacheDir: string
+    configDir: string
+    stateDir: string
+  }
+
+  export type Registry = {
+    commands: Record<string, Base & NonNullable<PluginManifest["commands"]>[string]>
+    agents: Record<string, Base & NonNullable<PluginManifest["agents"]>[string]>
+    skills: Record<string, Base & NonNullable<PluginManifest["skills"]>[string]>
+    mcpServers: Record<string, Base & NonNullable<PluginManifest["mcpServers"]>[string]>
+    lspServers: Record<string, Base & Record<string, unknown>>
+    outputStyles: Record<string, Base & NonNullable<PluginManifest["outputStyles"]>[string]>
+    channels: Record<string, Base & NonNullable<PluginManifest["channels"]>[string]>
+  }
+
+  export const DescriptorInfo = z
+    .object({
+      id: z.string(),
+      spec: z.string(),
+      version: z.string().optional(),
+      keys: z.array(z.string()),
+      source: z.enum(["file", "npm"]),
+      target: z.string(),
+      dir: z.string(),
+      scope: z.enum(["global", "local"]),
+      options: z.record(z.string(), z.unknown()).optional(),
+      manifest: PluginManifest.optional(),
+      dataDir: z.string(),
+      cacheDir: z.string(),
+      configDir: z.string(),
+      stateDir: z.string(),
+    })
+    .meta({
+      ref: "PluginDescriptor",
+    })
+
+  export const ChannelInfo = z
+    .object({
+      id: z.string(),
+      key: z.string(),
+      plugin: z.string(),
+      dir: z.string(),
+      spec: z.string(),
+      name: z.string().optional(),
+      description: z.string().optional(),
+      prompt: z.string().optional(),
+      path: z.string().optional(),
+      enabled: z.boolean().optional(),
+    })
+    .catchall(z.unknown())
+    .meta({
+      ref: "PluginChannel",
+    })
+
   type State = {
     hooks: Hooks[]
+    plugins: Descriptor[]
+    registry: Registry
+  }
+
+  type Pending = {
+    load?: PluginLoader.Loaded
+    item: Descriptor
   }
 
   // Hook names that follow the (input, output) => Promise<void> trigger pattern
@@ -43,6 +143,8 @@ export namespace Plugin {
       output: Output,
     ) => Effect.Effect<Output>
     readonly list: () => Effect.Effect<Hooks[]>
+    readonly plugins: () => Effect.Effect<Descriptor[]>
+    readonly registry: () => Effect.Effect<Registry>
     readonly init: () => Effect.Effect<void>
   }
 
@@ -89,16 +191,207 @@ export namespace Plugin {
     Effect.runFork(bus.publish(Session.Event.Error, { error: new NamedError.Unknown({ message }).toObject() }))
   }
 
-  async function applyPlugin(load: PluginLoader.Loaded, input: PluginInput, hooks: Hooks[]) {
-    const plugin = readV1Plugin(load.mod, load.spec, "server", "detect")
-    if (plugin) {
-      await resolvePluginId(load.source, load.spec, load.target, readPluginId(plugin.id, load.spec), load.pkg)
-      hooks.push(await (plugin as PluginModule).server(input, load.options))
+  function mergeManifest(...items: Array<PluginManifest | undefined>) {
+    const list = items.filter(Boolean)
+    if (list.length === 0) return
+    return list.reduce<PluginManifest>((acc, item) => mergeDeep(acc, item!), {})
+  }
+
+  function scoped(plugin: string, key: string, name?: string) {
+    if (name?.trim()) return name.trim()
+    return `${plugin}:${key}`
+  }
+
+  function refs(item: Descriptor) {
+    return Object.entries(item.manifest?.dependencies ?? {}).map(([key, value]) => {
+      if (typeof value === "string") {
+        return {
+          id: key,
+          optional: false,
+          version: value,
+        }
+      }
+
+      return {
+        id: value.id?.trim() || key,
+        optional: value.optional === true,
+        version: value.version,
+      }
+    })
+  }
+
+  function version(item: Descriptor, range?: string) {
+    if (!range) return true
+    if (!item.version) return false
+    if (semver.valid(item.version) && semver.validRange(range)) {
+      return semver.satisfies(item.version, range)
+    }
+    return item.version === range
+  }
+
+  function dependencies(items: Pending[]) {
+    const ready = new Map(items.map((item) => [item.item.id, item]))
+    const blocked = new Map<string, string>()
+    let changed = true
+
+    while (changed) {
+      changed = false
+      for (const [id, row] of Array.from(ready.entries())) {
+        const fail = refs(row.item).find((dep) => {
+          const hit = ready.get(dep.id)
+          if (!hit) return !dep.optional
+          if (!version(hit.item, dep.version)) return !dep.optional
+          return false
+        })
+        if (!fail) continue
+
+        const rule = fail.version ? `${fail.id}@${fail.version}` : fail.id
+        blocked.set(id, `Plugin ${row.item.spec} requires plugin ${rule}`)
+        ready.delete(id)
+        changed = true
+      }
+    }
+
+    return {
+      allowed: Array.from(ready.values()),
+      blocked,
+    }
+  }
+
+  async function input(
+    base: Omit<PluginInput, "pluginID" | "pluginSpec" | "dataDir" | "cacheDir" | "configDir" | "stateDir">,
+    item: Descriptor,
+  ) {
+    await Promise.all(
+      [item.dataDir, item.cacheDir, item.configDir, item.stateDir].map((dir) => mkdir(dir, { recursive: true })),
+    )
+    return {
+      ...base,
+      pluginID: item.id,
+      pluginSpec: item.spec,
+      dataDir: item.dataDir,
+      cacheDir: item.cacheDir,
+      configDir: item.configDir,
+      stateDir: item.stateDir,
+    } satisfies PluginInput
+  }
+
+  function buildRegistry(plugins: Descriptor[]): Registry {
+    const out: Registry = {
+      commands: {},
+      agents: {},
+      skills: {},
+      mcpServers: {},
+      lspServers: {},
+      outputStyles: {},
+      channels: {},
+    }
+
+    for (const plugin of plugins) {
+      const manifest = plugin.manifest
+      if (!manifest) continue
+
+      for (const [key, item] of Object.entries(manifest.commands ?? {})) {
+        const id = scoped(plugin.id, key, item.name)
+        out.commands[id] = { ...item, id, key, plugin: plugin.id, dir: plugin.dir, spec: plugin.spec }
+      }
+
+      for (const [key, item] of Object.entries(manifest.agents ?? {})) {
+        const id = scoped(plugin.id, key, item.name)
+        out.agents[id] = { ...item, id, key, plugin: plugin.id, dir: plugin.dir, spec: plugin.spec }
+      }
+
+      for (const [key, item] of Object.entries(manifest.skills ?? {})) {
+        const id = scoped(plugin.id, key, item.name)
+        out.skills[id] = { ...item, id, key, plugin: plugin.id, dir: plugin.dir, spec: plugin.spec }
+      }
+
+      for (const [key, item] of Object.entries(manifest.mcpServers ?? {})) {
+        const id = scoped(plugin.id, key, item.name)
+        out.mcpServers[id] = { ...item, id, key, plugin: plugin.id, dir: plugin.dir, spec: plugin.spec }
+      }
+
+      for (const [key, item] of Object.entries(manifest.lspServers ?? {})) {
+        const id = scoped(plugin.id, key)
+        out.lspServers[id] = { ...item, id, key, plugin: plugin.id, dir: plugin.dir, spec: plugin.spec }
+      }
+
+      for (const [key, item] of Object.entries(manifest.outputStyles ?? {})) {
+        const id = scoped(plugin.id, key)
+        out.outputStyles[id] = { ...item, id, key, plugin: plugin.id, dir: plugin.dir, spec: plugin.spec }
+      }
+
+      for (const [key, item] of Object.entries(manifest.channels ?? {})) {
+        const id = scoped(plugin.id, key)
+        out.channels[id] = { ...item, id, key, plugin: plugin.id, dir: plugin.dir, spec: plugin.spec }
+      }
+    }
+
+    return out
+  }
+
+  async function descriptor(
+    input: Pick<PluginLoader.Resolved, "spec" | "source" | "target" | "pkg" | "options"> & {
+      scope: Config.PluginScope
+      mod?: Record<string, unknown>
+    },
+  ) {
+    const dir = resolvePluginRoot(input.target, input.pkg)
+    const file = await readPluginManifestFile(input.target, input.pkg).catch(() => undefined)
+    const mod = input.mod ? readPluginModuleManifest(input.mod, input.spec) : undefined
+    const manifest = mergeManifest(file, mod)
+    const base = input.mod?.default
+    const raw = readPluginId((isRecord(base) ? base.id : undefined) ?? manifest?.id ?? manifest?.name, input.spec)
+    const id =
+      raw || input.source === "npm"
+        ? await resolvePluginId(input.source, input.spec, input.target, raw, input.pkg)
+        : path.basename(dir)
+    const dirs = pluginStorage(id)
+    const keys = pluginKeys({
+      spec: input.spec,
+      id,
+      target: input.target,
+      pkg: input.pkg,
+    })
+
+    return {
+      id,
+      spec: input.spec,
+      version:
+        manifest?.version ??
+        (typeof input.pkg?.json.version === "string" ? input.pkg.json.version.trim() || undefined : undefined),
+      keys,
+      source: input.source,
+      target: input.target,
+      dir,
+      scope: input.scope,
+      options: input.options,
+      manifest,
+      dataDir: dirs.dataDir,
+      cacheDir: dirs.cacheDir,
+      configDir: dirs.configDir,
+      stateDir: dirs.stateDir,
+    } satisfies Descriptor
+  }
+
+  async function start(
+    load: PluginLoader.Loaded,
+    item: Descriptor,
+    base: Omit<PluginInput, "pluginID" | "pluginSpec" | "dataDir" | "cacheDir" | "configDir" | "stateDir">,
+    hooks: Hooks[],
+  ) {
+    const mod = load.mod.default
+    const next = await input(base, item)
+    if (isRecord(mod) && "server" in mod) {
+      const plugin = readV1Plugin(load.mod, load.spec, "server")
+      hooks.push(await (plugin as PluginModule).server(next, load.options))
       return
     }
 
+    if (item.manifest) return
+
     for (const server of getLegacyPlugins(load.mod)) {
-      hooks.push(await server(input, load.options))
+      hooks.push(await server(next, load.options))
     }
   }
 
@@ -108,9 +401,10 @@ export namespace Plugin {
       const bus = yield* Bus.Service
       const config = yield* Config.Service
 
-      const state = yield* InstanceState.make<State>(
-        Effect.fn("Plugin.state")(function* (ctx) {
+      const state = yield* InstanceState.make<State>((ctx) =>
+        Effect.gen(function* () {
           const hooks: Hooks[] = []
+          const items: Descriptor[] = []
 
           const { Server } = yield* Effect.promise(() => import("../server/server"))
 
@@ -125,7 +419,7 @@ export namespace Plugin {
             fetch: async (...args) => Server.Default().app.fetch(...args),
           })
           const cfg = yield* config.get()
-          const input: PluginInput = {
+          const base = {
             client,
             project: ctx.project,
             worktree: ctx.worktree,
@@ -133,14 +427,26 @@ export namespace Plugin {
             get serverUrl(): URL {
               return Server.url ?? new URL("http://localhost:4096")
             },
-            // @ts-expect-error
-            $: typeof Bun === "undefined" ? undefined : Bun.$,
-          }
+            $: Bun.$ as PluginInput["$"],
+          } satisfies Omit<PluginInput, "pluginID" | "pluginSpec" | "dataDir" | "cacheDir" | "configDir" | "stateDir">
 
           for (const plugin of INTERNAL_PLUGINS) {
             log.info("loading internal plugin", { name: plugin.name })
+            const dirs = pluginStorage(plugin.name, cfg.plugins?.cache)
             const init = yield* Effect.tryPromise({
-              try: () => plugin(input),
+              try: async () => {
+                await Promise.all(
+                  [dirs.dataDir, dirs.cacheDir, dirs.configDir, dirs.stateDir].map((dir) =>
+                    mkdir(dir, { recursive: true }),
+                  ),
+                )
+                return plugin({
+                  ...base,
+                  pluginID: plugin.name,
+                  pluginSpec: plugin.name,
+                  ...dirs,
+                })
+              },
               catch: (err) => {
                 log.error("failed to load internal plugin", { name: plugin.name, error: err })
               },
@@ -148,16 +454,36 @@ export namespace Plugin {
             if (init._tag === "Some") hooks.push(init.value)
           }
 
-          const plugins = Flag.OPENCODE_PURE ? [] : (cfg.plugin_origins ?? [])
+          const origins = Flag.OPENCODE_PURE ? [] : (cfg.plugin_origins ?? [])
           if (Flag.OPENCODE_PURE && cfg.plugin_origins?.length) {
             log.info("skipping external plugins in pure mode", { count: cfg.plugin_origins.length })
           }
-          if (plugins.length) yield* config.waitForDependencies()
+          if (origins.length) yield* config.waitForDependencies()
 
           const loaded = yield* Effect.promise(() =>
             PluginLoader.loadExternal({
-              items: plugins,
+              items: origins,
               kind: "server",
+              finish: async (load, origin) => {
+                try {
+                  const item = await descriptor({ ...load, scope: origin.scope, mod: load.mod })
+                  return { load, item } satisfies Pending
+                } catch (err) {
+                  const message = errorMessage(err)
+                  log.error("failed to load plugin", { path: load.spec, error: message })
+                  publishPluginError(bus, `Failed to load plugin ${load.spec}: ${message}`)
+                }
+              },
+              missing: async (load, origin) => {
+                const item = await descriptor({ ...load, scope: origin.scope }).catch((err) => {
+                  const message = errorMessage(err)
+                  log.error("failed to read plugin manifest", { path: load.spec, error: message })
+                  publishPluginError(bus, `Failed to load plugin ${load.spec}: ${message}`)
+                  return undefined
+                })
+                if (!item?.manifest) return
+                return { item } satisfies Pending
+              },
               report: {
                 start(candidate) {
                   log.info("loading plugin", { path: candidate.plan.spec })
@@ -195,27 +521,57 @@ export namespace Plugin {
               },
             }),
           )
-          for (const load of loaded) {
-            if (!load) continue
+          const allowed: Pending[] = []
+          for (const row of loaded) {
+            const hit = checkPluginPolicy(cfg.plugins?.policy, {
+              spec: row.item.spec,
+              id: row.item.id,
+              target: row.item.target,
+            })
+            if (!hit.ok) {
+              log.warn("plugin blocked by policy", { spec: row.item.spec, reason: hit.reason })
+              publishPluginError(bus, hit.reason)
+              continue
+            }
+            row.item.keys = hit.keys
+            const dirs = pluginStorage(row.item.id, cfg.plugins?.cache)
+            row.item.dataDir = dirs.dataDir
+            row.item.cacheDir = dirs.cacheDir
+            row.item.configDir = dirs.configDir
+            row.item.stateDir = dirs.stateDir
+            allowed.push(row)
+          }
 
-            // Keep plugin execution sequential so hook registration and execution
-            // order remains deterministic across plugin runs.
+          const deps = dependencies(allowed)
+          for (const reason of deps.blocked.values()) {
+            log.warn("plugin skipped due to missing dependency", { reason })
+            publishPluginError(bus, reason)
+          }
+
+          items.push(...deps.allowed.map((row) => row.item))
+
+          yield* Effect.tryPromise({
+            try: () =>
+              PluginMeta.touchMany(
+                deps.allowed.map((row) => ({
+                  spec: row.item.spec,
+                  target: row.item.target,
+                  id: row.item.id,
+                })),
+              ),
+            catch: () => undefined,
+          }).pipe(Effect.ignore)
+
+          for (const row of deps.allowed) {
+            if (!row.load) continue
             yield* Effect.tryPromise({
-              try: () => applyPlugin(load, input, hooks),
+              try: () => start(row.load!, row.item, base, hooks),
               catch: (err) => {
                 const message = errorMessage(err)
-                log.error("failed to load plugin", { path: load.spec, error: message })
-                return message
+                log.error("failed to initialize plugin", { spec: row.item.spec, error: message })
+                publishPluginError(bus, `Failed to load plugin ${row.item.spec}: ${message}`)
               },
-            }).pipe(
-              Effect.catch((message) =>
-                bus.publish(Session.Event.Error, {
-                  error: new NamedError.Unknown({
-                    message: `Failed to load plugin ${load.spec}: ${message}`,
-                  }).toObject(),
-                }),
-              ),
-            )
+            }).pipe(Effect.ignore)
           }
 
           // Notify plugins of current config
@@ -240,8 +596,8 @@ export namespace Plugin {
             Effect.forkScoped,
           )
 
-          return { hooks }
-        }),
+          return { hooks, plugins: items, registry: buildRegistry(items) }
+        }).pipe(Effect.orDie),
       )
 
       const trigger = Effect.fn("Plugin.trigger")(function* <
@@ -264,11 +620,21 @@ export namespace Plugin {
         return s.hooks
       })
 
+      const plugins = Effect.fn("Plugin.plugins")(function* () {
+        const s = yield* InstanceState.get(state)
+        return s.plugins
+      })
+
+      const registryState = Effect.fn("Plugin.registry")(function* () {
+        const s = yield* InstanceState.get(state)
+        return s.registry
+      })
+
       const init = Effect.fn("Plugin.init")(function* () {
         yield* InstanceState.get(state)
       })
 
-      return Service.of({ trigger, list, init })
+      return Service.of({ trigger, list, plugins, registry: registryState, init })
     }),
   )
 
@@ -285,6 +651,14 @@ export namespace Plugin {
 
   export async function list(): Promise<Hooks[]> {
     return runPromise((svc) => svc.list())
+  }
+
+  export async function plugins() {
+    return runPromise((svc) => svc.plugins())
+  }
+
+  export async function registry() {
+    return runPromise((svc) => svc.registry())
   }
 
   export async function init() {

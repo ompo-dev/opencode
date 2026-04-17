@@ -45,9 +45,19 @@ function isMcpConfigured(config: McpEntry): config is McpConfigured {
   return typeof config === "object" && config !== null && "type" in config
 }
 
-type McpRemote = Extract<McpConfigured, { type: "remote" }>
+type McpRemote = Extract<McpConfigured, { type: "remote" | "http" | "sse" }>
 function isMcpRemote(config: McpEntry): config is McpRemote {
-  return isMcpConfigured(config) && config.type === "remote"
+  return isMcpConfigured(config) && (config.type === "remote" || config.type === "http" || config.type === "sse")
+}
+
+function label(config: McpConfigured) {
+  if (config.type === "local" || config.type === "stdio") {
+    return config.command.join(" ")
+  }
+  if (config.type === "sdk") {
+    return config.client ?? "sdk"
+  }
+  return config.url
 }
 
 export const McpCommand = cmd({
@@ -75,8 +85,7 @@ export const McpListCommand = cmd({
         UI.empty()
         prompts.intro("MCP Servers")
 
-        const config = await Config.get()
-        const mcpServers = config.mcp ?? {}
+        const mcpServers = await MCP.configured()
         const statuses = await MCP.status()
 
         const servers = Object.entries(mcpServers).filter((entry): entry is [string, McpConfigured] =>
@@ -91,7 +100,7 @@ export const McpListCommand = cmd({
 
         for (const [name, serverConfig] of servers) {
           const status = statuses[name]
-          const hasOAuth = isMcpRemote(serverConfig) && !!serverConfig.oauth
+          const hasOAuth = isMcpRemote(serverConfig) && serverConfig.oauth !== false
           const hasStoredTokens = await MCP.hasStoredTokens(name)
 
           let statusIcon: string
@@ -123,7 +132,7 @@ export const McpListCommand = cmd({
             hint = "\n    " + status.error
           }
 
-          const typeHint = serverConfig.type === "remote" ? serverConfig.url : serverConfig.command.join(" ")
+          const typeHint = label(serverConfig)
           prompts.log.info(
             `${statusIcon} ${name} ${UI.Style.TEXT_DIM}${statusText}${hint}\n    ${UI.Style.TEXT_DIM}${typeHint}`,
           )
@@ -152,8 +161,7 @@ export const McpAuthCommand = cmd({
         UI.empty()
         prompts.intro("MCP OAuth Authentication")
 
-        const config = await Config.get()
-        const mcpServers = config.mcp ?? {}
+        const mcpServers = await MCP.configured()
 
         // Get OAuth-capable servers (remote servers with oauth not explicitly disabled)
         const oauthServers = Object.entries(mcpServers).filter(
@@ -289,8 +297,7 @@ export const McpAuthListCommand = cmd({
         UI.empty()
         prompts.intro("MCP OAuth Status")
 
-        const config = await Config.get()
-        const mcpServers = config.mcp ?? {}
+        const mcpServers = await MCP.configured()
 
         // Get OAuth-capable servers
         const oauthServers = Object.entries(mcpServers).filter(
@@ -465,20 +472,35 @@ export const McpAddCommand = cmd({
           message: "Select MCP server type",
           options: [
             {
-              label: "Local",
-              value: "local",
-              hint: "Run a local command",
+              label: "Stdio",
+              value: "stdio",
+              hint: "Run a local command over stdio",
             },
             {
-              label: "Remote",
-              value: "remote",
-              hint: "Connect to a remote URL",
+              label: "HTTP",
+              value: "http",
+              hint: "Connect using Streamable HTTP",
+            },
+            {
+              label: "SSE",
+              value: "sse",
+              hint: "Connect using Server-Sent Events",
+            },
+            {
+              label: "WebSocket",
+              value: "ws",
+              hint: "Connect using WebSocket",
+            },
+            {
+              label: "SDK",
+              value: "sdk",
+              hint: "Bind to a registered in-process MCP client",
             },
           ],
         })
         if (prompts.isCancel(type)) throw new UI.CancelledError()
 
-        if (type === "local") {
+        if (type === "stdio") {
           const command = await prompts.text({
             message: "Enter command to run",
             placeholder: "e.g., opencode x @modelcontextprotocol/server-filesystem",
@@ -487,7 +509,7 @@ export const McpAddCommand = cmd({
           if (prompts.isCancel(command)) throw new UI.CancelledError()
 
           const mcpConfig: Config.Mcp = {
-            type: "local",
+            type: "stdio",
             command: command.split(" "),
           }
 
@@ -497,7 +519,26 @@ export const McpAddCommand = cmd({
           return
         }
 
-        if (type === "remote") {
+        if (type === "sdk") {
+          const client = await prompts.text({
+            message: "Enter registered SDK client name",
+            placeholder: "e.g., my-sdk-client",
+            validate: (x) => (x && x.length > 0 ? undefined : "Required"),
+          })
+          if (prompts.isCancel(client)) throw new UI.CancelledError()
+
+          const mcpConfig: Config.Mcp = {
+            type: "sdk",
+            client,
+          }
+
+          await addMcpToConfig(name, mcpConfig, configPath)
+          prompts.log.success(`MCP server "${name}" added to ${configPath}`)
+          prompts.outro("MCP server added successfully")
+          return
+        }
+
+        if (type === "http" || type === "sse" || type === "ws") {
           const url = await prompts.text({
             message: "Enter MCP server URL",
             placeholder: "e.g., https://example.com/mcp",
@@ -509,6 +550,18 @@ export const McpAddCommand = cmd({
             },
           })
           if (prompts.isCancel(url)) throw new UI.CancelledError()
+
+          if (type === "ws") {
+            const mcpConfig: Config.Mcp = {
+              type,
+              url,
+              oauth: false,
+            }
+            await addMcpToConfig(name, mcpConfig, configPath)
+            prompts.log.success(`MCP server "${name}" added to ${configPath}`)
+            prompts.outro("MCP server added successfully")
+            return
+          }
 
           const useOAuth = await prompts.confirm({
             message: "Does this server require OAuth authentication?",
@@ -548,7 +601,7 @@ export const McpAddCommand = cmd({
               }
 
               mcpConfig = {
-                type: "remote",
+                type,
                 url,
                 oauth: {
                   clientId,
@@ -557,14 +610,14 @@ export const McpAddCommand = cmd({
               }
             } else {
               mcpConfig = {
-                type: "remote",
+                type,
                 url,
                 oauth: {},
               }
             }
           } else {
             mcpConfig = {
-              type: "remote",
+              type,
               url,
             }
           }
@@ -595,8 +648,7 @@ export const McpDebugCommand = cmd({
         UI.empty()
         prompts.intro("MCP OAuth Debug")
 
-        const config = await Config.get()
-        const mcpServers = config.mcp ?? {}
+        const mcpServers = await MCP.configured()
         const serverName = args.name
 
         const serverConfig = mcpServers[serverName]

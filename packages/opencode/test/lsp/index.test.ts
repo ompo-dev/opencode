@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import path from "path"
 import fs from "fs/promises"
+import { pathToFileURL } from "url"
 import * as Lsp from "../../src/lsp/index"
 import * as launch from "../../src/lsp/launch"
 import { LSPServer } from "../../src/lsp/server"
@@ -128,6 +129,54 @@ describe("lsp.spawn", () => {
       expect(args).toContain("--ignore-node-modules")
     } finally {
       spawnSpy.mockRestore()
+    }
+  })
+
+  test("uses plugin-provided LSP servers from manifest", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        const plugin = path.join(dir, "plugin.ts")
+        await Bun.write(
+          plugin,
+          [
+            "export default {",
+            "  id: 'acme',",
+            "  manifest: {",
+            "    lspServers: {",
+            "      demo: {",
+            "        command: ['demo-lsp'],",
+            "        extensions: ['.demo'],",
+            "      },",
+            "    },",
+            "  },",
+            "}",
+            "",
+          ].join("\n"),
+        )
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify(
+            {
+              $schema: "https://opencode.ai/config.json",
+              plugin: [pathToFileURL(plugin).href],
+            },
+            null,
+            2,
+          ),
+        )
+      },
+    })
+
+    try {
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          expect(await Lsp.LSP.hasClients(path.join(tmp.path, "src", "file.demo"))).toBe(true)
+          expect(await Lsp.LSP.hasClients(path.join(tmp.path, "src", "file.txt"))).toBe(false)
+        },
+      })
+    } finally {
+      await Instance.disposeAll()
     }
   })
 })

@@ -30,6 +30,12 @@ export type PluginInput = {
   directory: string
   worktree: string
   serverUrl: URL
+  pluginID: string
+  pluginSpec: string
+  dataDir: string
+  cacheDir: string
+  configDir: string
+  stateDir: string
   $: BunShell
 }
 
@@ -43,8 +49,93 @@ export type Plugin = (input: PluginInput, options?: PluginOptions) => Promise<Ho
 
 export type PluginModule = {
   id?: string
+  manifest?: PluginManifest
   server: Plugin
   tui?: never
+}
+
+export type PluginRef = {
+  id?: string
+  version?: string
+  optional?: boolean
+}
+
+export type PluginCommand = {
+  name?: string
+  description?: string
+  template?: string
+  path?: string
+  agent?: string
+  model?: string
+  subtask?: boolean
+}
+
+export type PluginSkill = {
+  name?: string
+  description?: string
+  path: string
+  paths?: string[]
+  agent?: string
+  model?: string
+  mode?: "inline" | "subagent"
+}
+
+export type PluginAgent = {
+  name?: string
+  description?: string
+  prompt?: string
+  path?: string
+  mode?: "subagent" | "primary" | "all"
+  model?: string
+  variant?: string
+  temperature?: number
+  top_p?: number
+  color?: string
+  hidden?: boolean
+  steps?: number
+  permission?: Record<string, unknown>
+  options?: Record<string, unknown>
+}
+
+export type PluginMCPServer = {
+  name?: string
+  description?: string
+  enabled?: boolean
+  config?: Record<string, unknown>
+}
+
+export type PluginLSPServer = Record<string, unknown>
+export type PluginOutputStyle = {
+  name?: string
+  description?: string
+  prompt?: string
+  path?: string
+  keepCodingInstructions?: boolean
+  forceForPlugin?: boolean
+}
+
+export type PluginChannel = {
+  name?: string
+  description?: string
+  prompt?: string
+  path?: string
+  enabled?: boolean
+}
+
+export type PluginManifest = {
+  id?: string
+  name?: string
+  version?: string
+  hooks?: string[]
+  dependencies?: Record<string, string | PluginRef>
+  commands?: Record<string, PluginCommand>
+  agents?: Record<string, PluginAgent>
+  skills?: Record<string, PluginSkill>
+  mcpServers?: Record<string, PluginMCPServer>
+  lspServers?: Record<string, PluginLSPServer>
+  outputStyles?: Record<string, PluginOutputStyle>
+  userConfig?: Record<string, unknown>
+  channels?: Record<string, PluginChannel>
 }
 
 type Rule = {

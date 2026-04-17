@@ -50,7 +50,7 @@ export const SkillTool = Tool.define("skill", async () => {
         metadata: {},
       })
 
-      const dir = path.dirname(skill.location)
+      const dir = skill.root
       const base = pathToFileURL(dir).href
 
       const limit = 10
@@ -82,7 +82,15 @@ export const SkillTool = Tool.define("skill", async () => {
           skill.content.trim(),
           "",
           `Base directory for this skill: ${base}`,
+          `Source: ${skill.source}${skill.plugin ? ` (${skill.plugin})` : ""}`,
+          skill.mode ? `Execution mode: ${skill.mode}` : "",
+          skill.agent ? `Recommended agent: ${skill.agent}` : "",
+          skill.model ? `Recommended model: ${skill.model}` : "",
+          skill.paths?.length ? `Path activation hints: ${skill.paths.join(", ")}` : "",
           "Relative paths in this skill (e.g., scripts/, reference/) are relative to this base directory.",
+          skill.mode === "subagent"
+            ? "This skill is designed for delegated execution. Load it, then prefer the task tool with the recommended agent when appropriate."
+            : "",
           "Note: file list is sampled.",
           "",
           "<skill_files>",

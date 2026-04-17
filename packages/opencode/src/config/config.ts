@@ -371,9 +371,8 @@ export namespace Config {
     return list.toReversed()
   }
 
-  export const McpLocal = z
+  const McpLocalBase = z
     .object({
-      type: z.literal("local").describe("Type of MCP server connection"),
       command: z.string().array().describe("Command and arguments to run the MCP server"),
       environment: z
         .record(z.string(), z.string())
@@ -388,9 +387,18 @@ export namespace Config {
         .describe("Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified."),
     })
     .strict()
-    .meta({
-      ref: "McpLocalConfig",
-    })
+
+  export const McpLocal = McpLocalBase.extend({
+    type: z.literal("local").describe("Type of MCP server connection"),
+  }).meta({
+    ref: "McpLocalConfig",
+  })
+
+  export const McpStdio = McpLocalBase.extend({
+    type: z.literal("stdio").describe("Type of MCP server connection"),
+  }).meta({
+    ref: "McpStdioConfig",
+  })
 
   export const McpOAuth = z
     .object({
@@ -411,9 +419,8 @@ export namespace Config {
     })
   export type McpOAuth = z.infer<typeof McpOAuth>
 
-  export const McpRemote = z
+  const McpRemoteBase = z
     .object({
-      type: z.literal("remote").describe("Type of MCP server connection"),
       url: z.string().describe("URL of the remote MCP server"),
       enabled: z.boolean().optional().describe("Enable or disable the MCP server on startup"),
       headers: z.record(z.string(), z.string()).optional().describe("Headers to send with the request"),
@@ -431,11 +438,49 @@ export namespace Config {
         .describe("Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified."),
     })
     .strict()
+
+  export const McpRemote = McpRemoteBase.extend({
+    type: z.literal("remote").describe("Type of MCP server connection"),
+  }).meta({
+    ref: "McpRemoteConfig",
+  })
+
+  export const McpHTTP = McpRemoteBase.extend({
+    type: z.literal("http").describe("Type of MCP server connection"),
+  }).meta({
+    ref: "McpHttpConfig",
+  })
+
+  export const McpSSE = McpRemoteBase.extend({
+    type: z.literal("sse").describe("Type of MCP server connection"),
+  }).meta({
+    ref: "McpSseConfig",
+  })
+
+  export const McpWS = McpRemoteBase.extend({
+    type: z.literal("ws").describe("Type of MCP server connection"),
+  }).meta({
+    ref: "McpWsConfig",
+  })
+
+  export const McpSDK = z
+    .object({
+      type: z.literal("sdk").describe("Type of MCP server connection"),
+      enabled: z.boolean().optional().describe("Enable or disable the MCP server on startup"),
+      timeout: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified."),
+      client: z.string().optional().describe("Named in-process MCP client to bind to"),
+    })
+    .strict()
     .meta({
-      ref: "McpRemoteConfig",
+      ref: "McpSdkConfig",
     })
 
-  export const Mcp = z.discriminatedUnion("type", [McpLocal, McpRemote])
+  export const Mcp = z.discriminatedUnion("type", [McpLocal, McpStdio, McpRemote, McpHTTP, McpSSE, McpWS, McpSDK])
   export type Mcp = z.infer<typeof Mcp>
 
   export const PermissionAction = z.enum(["ask", "allow", "deny"]).meta({
@@ -495,6 +540,10 @@ export namespace Config {
           lsp: PermissionRule.optional(),
           doom_loop: PermissionAction.optional(),
           skill: PermissionRule.optional(),
+          sleep: PermissionAction.optional(),
+          task_status: PermissionRule.optional(),
+          task_wait: PermissionRule.optional(),
+          task_message: PermissionRule.optional(),
         })
         .catchall(PermissionRule)
         .or(PermissionAction),
@@ -515,6 +564,8 @@ export namespace Config {
   export type Command = z.infer<typeof Command>
 
   export const Skills = z.object({
+    bundled: z.boolean().optional().describe("Enable bundled skills shipped with opencode"),
+    managed: z.array(z.string()).optional().describe("Additional managed skill folder paths"),
     paths: z.array(z.string()).optional().describe("Additional paths to skill folders"),
     urls: z
       .array(z.string())
@@ -522,6 +573,51 @@ export namespace Config {
       .describe("URLs to fetch skills from (e.g., https://example.com/.well-known/skills/)"),
   })
   export type Skills = z.infer<typeof Skills>
+
+  export const Plugins = z
+    .object({
+      marketplaces: z
+        .record(
+          z.string(),
+          z.object({
+            url: z.string().optional(),
+            type: z.enum(["npm", "git", "file", "directory"]).optional(),
+          }),
+        )
+        .optional()
+        .describe("Known plugin marketplaces and source locations"),
+      policy: z
+        .object({
+          lockdown: z.boolean().optional(),
+          allow: z.array(z.string()).optional(),
+          deny: z.array(z.string()).optional(),
+        })
+        .optional()
+        .describe("Plugin policy and lockdown controls"),
+      cache: z
+        .object({
+          version: z.string().optional(),
+          directory: z.string().optional(),
+        })
+        .optional()
+        .describe("Plugin cache settings"),
+    })
+    .optional()
+  export type Plugins = z.infer<typeof Plugins>
+
+  export const LspServer = z.union([
+    z.object({
+      disabled: z.literal(true),
+    }),
+    z.object({
+      command: z.array(z.string()),
+      extensions: z.array(z.string()).optional(),
+      disabled: z.boolean().optional(),
+      env: z.record(z.string(), z.string()).optional(),
+      initialization: z.record(z.string(), z.unknown()).optional(),
+    }),
+  ])
+  export type LspServer = z.infer<typeof LspServer>
 
   export const Agent = z
     .object({
@@ -930,6 +1026,7 @@ export namespace Config {
           "Enable or disable snapshot tracking. When false, filesystem snapshots are not recorded and undoing or reverting will not undo/redo file changes. Defaults to true.",
         ),
       plugin: PluginSpec.array().optional(),
+      plugins: Plugins.describe("Plugin marketplace, cache, and policy settings"),
       share: z
         .enum(["manual", "auto", "disabled"])
         .optional()
@@ -961,6 +1058,10 @@ export namespace Config {
         .describe(
           "Default agent to use when none is specified. Must be a primary agent. Falls back to 'build' if not set or if the specified agent is invalid.",
         ),
+      output_style: z
+        .string()
+        .optional()
+        .describe("Preferred response output style. Use 'default' to disable custom style prompts."),
       username: z
         .string()
         .optional()
@@ -1025,21 +1126,7 @@ export namespace Config {
       lsp: z
         .union([
           z.literal(false),
-          z.record(
-            z.string(),
-            z.union([
-              z.object({
-                disabled: z.literal(true),
-              }),
-              z.object({
-                command: z.array(z.string()),
-                extensions: z.array(z.string()).optional(),
-                disabled: z.boolean().optional(),
-                env: z.record(z.string(), z.string()).optional(),
-                initialization: z.record(z.string(), z.any()).optional(),
-              }),
-            ]),
-          ),
+          z.record(z.string(), LspServer),
         ])
         .optional()
         .refine(

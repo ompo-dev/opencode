@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { parsePluginSpecifier } from "../../src/plugin/shared"
+import path from "path"
+import { Global } from "../../src/global"
+import { checkPluginPolicy, parsePluginSpecifier, pluginStorage, resolveMarketplaceSpec } from "../../src/plugin/shared"
 
 describe("parsePluginSpecifier", () => {
   test("parses standard npm package without version", () => {
@@ -84,5 +86,83 @@ describe("parsePluginSpecifier", () => {
       pkg: "@opencode/acme",
       version: "latest",
     })
+  })
+
+  test("blocks plugin when deny rule matches package name", () => {
+    expect(
+      checkPluginPolicy(
+        {
+          deny: ["@opencode/acme"],
+        },
+        {
+          spec: "@opencode/acme@1.0.0",
+          id: "acme",
+        },
+      ),
+    ).toMatchObject({
+      ok: false,
+    })
+  })
+
+  test("allows plugin during lockdown when allow rule matches id", () => {
+    expect(
+      checkPluginPolicy(
+        {
+          lockdown: true,
+          allow: ["acme"],
+        },
+        {
+          spec: "acme@1.0.0",
+          id: "acme",
+        },
+      ),
+    ).toMatchObject({
+      ok: true,
+    })
+  })
+
+  test("uses versioned plugin cache directory", () => {
+    const out = pluginStorage("acme/plugin", {
+      directory: path.join(Global.Path.cache, "custom"),
+      version: "v2",
+    })
+
+    expect(out.dataDir).toBe(path.join(Global.Path.data, "plugin", "acme_plugin"))
+    expect(out.cacheDir).toBe(path.join(Global.Path.cache, "custom", "v2", "acme_plugin"))
+    expect(out.configDir).toBe(path.join(Global.Path.config, "plugin", "acme_plugin"))
+    expect(out.stateDir).toBe(path.join(Global.Path.state, "plugin", "acme_plugin"))
+  })
+
+  test("resolves npm marketplace aliases", () => {
+    expect(
+      resolveMarketplaceSpec("corp:demo@1.2.3", {
+        corp: {
+          url: "@corp/",
+          type: "npm",
+        },
+      }),
+    ).toBe("@corp/demo@1.2.3")
+  })
+
+  test("resolves git marketplace aliases with placeholders", () => {
+    expect(
+      resolveMarketplaceSpec("git:demo@main", {
+        git: {
+          url: "https://github.com/acme/{name}.git",
+          type: "git",
+        },
+      }),
+    ).toBe("https://github.com/acme/demo.git#main")
+  })
+
+  test("resolves directory marketplace aliases", () => {
+    expect(
+      resolveMarketplaceSpec("local:demo", {
+        local: {
+          url: path.join("C:", "plugins"),
+          type: "directory",
+        },
+      }),
+    ).toBe(path.join("C:", "plugins", "demo"))
   })
 })

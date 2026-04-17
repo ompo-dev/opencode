@@ -1,6 +1,6 @@
 import os from "os"
 import path from "path"
-import { pathToFileURL } from "url"
+import { fileURLToPath, pathToFileURL } from "url"
 import z from "zod"
 import { Effect, Layer, ServiceMap } from "effect"
 import { NamedError } from "@opencode-ai/util/error"
@@ -14,6 +14,8 @@ import { Permission } from "@/permission"
 import { AppFileSystem } from "@/filesystem"
 import { Config } from "../config/config"
 import { ConfigMarkdown } from "../config/markdown"
+import { Plugin } from "../plugin"
+import { resolvePluginAsset } from "../plugin/shared"
 import { Glob } from "../util/glob"
 import { Log } from "../util/log"
 import { Discovery } from "./discovery"
@@ -24,14 +26,31 @@ export namespace Skill {
   const EXTERNAL_SKILL_PATTERN = "skills/**/SKILL.md"
   const OPENCODE_SKILL_PATTERN = "{skill,skills}/**/SKILL.md"
   const SKILL_PATTERN = "**/SKILL.md"
+  const BUNDLED_DIR = fileURLToPath(new URL("../../skills", import.meta.url))
 
   export const Info = z.object({
     name: z.string(),
     description: z.string(),
     location: z.string(),
+    root: z.string(),
     content: z.string(),
+    source: z.enum(["bundled", "config", "global", "plugin", "project", "remote"]),
+    plugin: z.string().optional(),
+    paths: z.array(z.string()).optional(),
+    agent: z.string().optional(),
+    model: z.string().optional(),
+    mode: z.enum(["inline", "subagent"]).optional(),
   })
   export type Info = z.infer<typeof Info>
+
+  const Frontmatter = z.object({
+    name: z.string(),
+    description: z.string(),
+    paths: z.array(z.string()).optional(),
+    agent: z.string().optional(),
+    model: z.string().optional(),
+    mode: z.enum(["inline", "subagent"]).optional(),
+  })
 
   export const InvalidError = NamedError.create(
     "SkillInvalidError",
@@ -63,7 +82,19 @@ export namespace Skill {
     readonly available: (agent?: Agent.Info) => Effect.Effect<Info[]>
   }
 
-  const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.Interface) {
+  type Add = {
+    source: Info["source"]
+    plugin?: string
+    root?: string
+    name?: string
+    description?: string
+    paths?: string[]
+    agent?: string
+    model?: string
+    mode?: Info["mode"]
+  }
+
+  const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.Interface, input: Add) {
     const md = yield* Effect.tryPromise({
       try: () => ConfigMarkdown.parse(match),
       catch: (err) => err,
@@ -83,7 +114,15 @@ export namespace Skill {
 
     if (!md) return
 
-    const parsed = Info.pick({ name: true, description: true }).safeParse(md.data)
+    const parsed = Frontmatter.safeParse({
+      ...md.data,
+      name: input.name ?? md.data.name,
+      description: input.description ?? md.data.description,
+      paths: input.paths ?? md.data.paths,
+      agent: input.agent ?? md.data.agent,
+      model: input.model ?? md.data.model,
+      mode: input.mode ?? md.data.mode,
+    })
     if (!parsed.success) return
 
     if (state.skills[parsed.data.name]) {
@@ -99,7 +138,14 @@ export namespace Skill {
       name: parsed.data.name,
       description: parsed.data.description,
       location: match,
-      content: md.content,
+      root: input.root ?? path.dirname(match),
+      content: md.content.trim(),
+      source: input.source,
+      plugin: input.plugin,
+      paths: parsed.data.paths,
+      agent: parsed.data.agent,
+      model: parsed.data.model,
+      mode: parsed.data.mode,
     }
   })
 
@@ -108,7 +154,7 @@ export namespace Skill {
     bus: Bus.Interface,
     root: string,
     pattern: string,
-    opts?: { dot?: boolean; scope?: string },
+    opts: { dot?: boolean; scope?: string; source: Info["source"]; plugin?: string },
   ) {
     const matches = yield* Effect.tryPromise({
       try: () =>
@@ -128,7 +174,7 @@ export namespace Skill {
       }),
     )
 
-    yield* Effect.forEach(matches, (match) => add(state, match, bus), {
+    yield* Effect.forEach(matches, (match) => add(state, match, bus, { source: opts.source, plugin: opts.plugin }), {
       concurrency: "unbounded",
       discard: true,
     })
@@ -138,16 +184,23 @@ export namespace Skill {
     state: State,
     config: Config.Interface,
     discovery: Discovery.Interface,
+    plugin: Plugin.Interface,
     bus: Bus.Interface,
     fsys: AppFileSystem.Interface,
     directory: string,
     worktree: string,
   ) {
+    const cfg = yield* config.get()
+
+    if (cfg.skills?.bundled !== false && (yield* fsys.isDir(BUNDLED_DIR))) {
+      yield* scan(state, bus, BUNDLED_DIR, SKILL_PATTERN, { source: "bundled" })
+    }
+
     if (!Flag.OPENCODE_DISABLE_EXTERNAL_SKILLS) {
       for (const dir of EXTERNAL_DIRS) {
         const root = path.join(Global.Path.home, dir)
         if (!(yield* fsys.isDir(root))) continue
-        yield* scan(state, bus, root, EXTERNAL_SKILL_PATTERN, { dot: true, scope: "global" })
+        yield* scan(state, bus, root, EXTERNAL_SKILL_PATTERN, { dot: true, scope: "global", source: "global" })
       }
 
       const upDirs = yield* fsys
@@ -155,16 +208,21 @@ export namespace Skill {
         .pipe(Effect.catch(() => Effect.succeed([] as string[])))
 
       for (const root of upDirs) {
-        yield* scan(state, bus, root, EXTERNAL_SKILL_PATTERN, { dot: true, scope: "project" })
+        yield* scan(state, bus, root, EXTERNAL_SKILL_PATTERN, { dot: true, scope: "project", source: "project" })
       }
     }
 
     const configDirs = yield* config.directories()
     for (const dir of configDirs) {
-      yield* scan(state, bus, dir, OPENCODE_SKILL_PATTERN)
+      yield* scan(state, bus, dir, OPENCODE_SKILL_PATTERN, { source: "config" })
     }
 
-    const cfg = yield* config.get()
+    for (const item of cfg.skills?.managed ?? []) {
+      const dir = path.isAbsolute(item) ? item : path.join(directory, item)
+      if (!(yield* fsys.isDir(dir))) continue
+      yield* scan(state, bus, dir, SKILL_PATTERN, { source: "config" })
+    }
+
     for (const item of cfg.skills?.paths ?? []) {
       const expanded = item.startsWith("~/") ? path.join(os.homedir(), item.slice(2)) : item
       const dir = path.isAbsolute(expanded) ? expanded : path.join(directory, expanded)
@@ -173,15 +231,31 @@ export namespace Skill {
         continue
       }
 
-      yield* scan(state, bus, dir, SKILL_PATTERN)
+      yield* scan(state, bus, dir, SKILL_PATTERN, { source: "config" })
     }
 
     for (const url of cfg.skills?.urls ?? []) {
       const pulledDirs = yield* discovery.pull(url)
       for (const dir of pulledDirs) {
         state.dirs.add(dir)
-        yield* scan(state, bus, dir, SKILL_PATTERN)
+        yield* scan(state, bus, dir, SKILL_PATTERN, { source: "remote" })
       }
+    }
+
+    const reg = yield* plugin.registry()
+    for (const [name, item] of Object.entries(reg.skills)) {
+      const file = resolvePluginAsset(item.spec, item.path, item.dir)
+      yield* add(state, file, bus, {
+        source: "plugin",
+        plugin: item.plugin,
+        root: path.dirname(file),
+        name,
+        description: item.description,
+        paths: item.paths,
+        agent: item.agent,
+        model: item.model,
+        mode: item.mode,
+      })
     }
 
     log.info("init", { count: Object.keys(state.skills).length })
@@ -194,14 +268,15 @@ export namespace Skill {
     Effect.gen(function* () {
       const discovery = yield* Discovery.Service
       const config = yield* Config.Service
+      const plugin = yield* Plugin.Service
       const bus = yield* Bus.Service
       const fsys = yield* AppFileSystem.Service
-      const state = yield* InstanceState.make(
-        Effect.fn("Skill.state")(function* (ctx) {
+      const state = yield* InstanceState.make<State>((ctx) =>
+        Effect.gen(function* () {
           const s: State = { skills: {}, dirs: new Set() }
-          yield* loadSkills(s, config, discovery, bus, fsys, ctx.directory, ctx.worktree)
+          yield* loadSkills(s, config, discovery, plugin, bus, fsys, ctx.directory, ctx.worktree)
           return s
-        }),
+        }).pipe(Effect.orDie),
       )
 
       const get = Effect.fn("Skill.get")(function* (name: string) {
@@ -233,6 +308,7 @@ export namespace Skill {
   export const defaultLayer = layer.pipe(
     Layer.provide(Discovery.defaultLayer),
     Layer.provide(Config.defaultLayer),
+    Layer.provide(Plugin.defaultLayer),
     Layer.provide(Bus.layer),
     Layer.provide(AppFileSystem.defaultLayer),
   )

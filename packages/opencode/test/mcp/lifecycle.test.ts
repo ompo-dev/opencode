@@ -84,6 +84,17 @@ class MockSSE {
   }
 }
 
+class MockWS {
+  constructor(_url: URL) {}
+  async start() {
+    if (connectShouldHang) return new Promise<void>(() => {})
+    if (connectShouldFail) throw new Error(connectError)
+  }
+  async close() {
+    transportCloseCount++
+  }
+}
+
 mock.module("@modelcontextprotocol/sdk/client/stdio.js", () => ({
   StdioClientTransport: MockStdioTransport,
 }))
@@ -94,6 +105,10 @@ mock.module("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
 
 mock.module("@modelcontextprotocol/sdk/client/sse.js", () => ({
   SSEClientTransport: MockSSE,
+}))
+
+mock.module("@modelcontextprotocol/sdk/client/websocket.js", () => ({
+  WebSocketClientTransport: MockWS,
 }))
 
 mock.module("@modelcontextprotocol/sdk/client/auth.js", () => ({
@@ -145,6 +160,27 @@ mock.module("@modelcontextprotocol/sdk/client/index.js", () => ({
         throw new Error("listResources failed")
       }
       return { resources: this._state?.resources ?? [] }
+    }
+
+    async getPrompt(input: { name: string }) {
+      const hit = this._state?.prompts.find((item) => item.name === input.name)
+      if (!hit) {
+        throw new Error("prompt not found")
+      }
+      return {
+        description: hit.description,
+        messages: [],
+      }
+    }
+
+    async readResource(input: { uri: string }) {
+      const hit = this._state?.resources.find((item) => item.uri === input.uri)
+      if (!hit) {
+        throw new Error("resource not found")
+      }
+      return {
+        contents: [{ text: hit.description ?? hit.name, uri: hit.uri }],
+      }
     }
 
     async close() {
@@ -477,6 +513,33 @@ test(
 )
 
 test(
+  "getPrompt() returns prompt content from connected servers",
+  withInstance(
+    {
+      "prompt-read-server": {
+        type: "local",
+        command: ["echo", "test"],
+      },
+    },
+    async () => {
+      lastCreatedClientName = "prompt-read-server"
+      const serverState = getOrCreateClientState("prompt-read-server")
+      serverState.prompts = [{ name: "my-prompt", description: "A test prompt" }]
+
+      await MCP.add("prompt-read-server", {
+        type: "local",
+        command: ["echo", "test"],
+      })
+
+      const prompt = await MCP.getPrompt("prompt-read-server", "my-prompt")
+      expect(prompt).toMatchObject({
+        description: "A test prompt",
+      })
+    },
+  ),
+)
+
+test(
   "resources() returns resources from connected servers",
   withInstance(
     {
@@ -500,6 +563,33 @@ test(
       const key = Object.keys(resources)[0]
       expect(key).toContain("resource-server")
       expect(key).toContain("my-resource")
+    },
+  ),
+)
+
+test(
+  "readResource() returns resource content from connected servers",
+  withInstance(
+    {
+      "resource-read-server": {
+        type: "local",
+        command: ["echo", "test"],
+      },
+    },
+    async () => {
+      lastCreatedClientName = "resource-read-server"
+      const serverState = getOrCreateClientState("resource-read-server")
+      serverState.resources = [{ name: "my-resource", uri: "file:///test.txt", description: "A test resource" }]
+
+      await MCP.add("resource-read-server", {
+        type: "local",
+        command: ["echo", "test"],
+      })
+
+      const resource = await MCP.readResource("resource-read-server", "file:///test.txt")
+      expect(resource).toMatchObject({
+        contents: [{ text: "A test resource", uri: "file:///test.txt" }],
+      })
     },
   ),
 )
@@ -746,5 +836,92 @@ test(
     expect(serverStatus.status).toBe("failed")
     // Both StreamableHTTP and SSE transports should be closed
     expect(transportCloseCount).toBeGreaterThanOrEqual(2)
+  }),
+)
+
+test(
+  "websocket transport connects successfully",
+  withInstance({}, async () => {
+    lastCreatedClientName = "ws-server"
+    const serverState = getOrCreateClientState("ws-server")
+    serverState.tools = [{ name: "ws_tool", description: "ws", inputSchema: { type: "object", properties: {} } }]
+
+    const addResult = await MCP.add("ws-server", {
+      type: "ws",
+      url: "ws://localhost:9999/mcp",
+      oauth: false,
+    })
+
+    const serverStatus = (addResult.status as any)["ws-server"] ?? addResult.status
+    expect(serverStatus.status).toBe("connected")
+
+    const tools = await MCP.tools()
+    expect(Object.keys(tools).some((key) => key.includes("ws_tool"))).toBe(true)
+  }),
+)
+
+test(
+  "websocket transport rejects unsupported oauth config",
+  withInstance({}, async () => {
+    const addResult = await MCP.add("ws-auth-server", {
+      type: "ws",
+      url: "ws://localhost:9999/mcp",
+      oauth: {},
+    })
+
+    const serverStatus = (addResult.status as any)["ws-auth-server"] ?? addResult.status
+    expect(serverStatus.status).toBe("failed")
+    expect(serverStatus.error).toContain("OAuth")
+  }),
+)
+
+test(
+  "sdk transport uses registered in-process clients",
+  withInstance({}, async () => {
+    let closed = false
+    const unregister = MCP.registerClient("fixture-sdk", async () => ({
+      async listTools() {
+        return {
+          tools: [{ name: "sdk_tool", description: "sdk", inputSchema: { type: "object", properties: {} } }],
+        }
+      },
+      async listPrompts() {
+        return { prompts: [] }
+      },
+      async listResources() {
+        return { resources: [] }
+      },
+      async getPrompt() {
+        return { messages: [] }
+      },
+      async readResource() {
+        return { contents: [] }
+      },
+      async close() {
+        closed = true
+      },
+      setNotificationHandler() {},
+      async callTool() {
+        return {}
+      },
+    }) as any)
+
+    try {
+      const addResult = await MCP.add("sdk-server", {
+        type: "sdk",
+        client: "fixture-sdk",
+      })
+
+      const serverStatus = (addResult.status as any)["sdk-server"] ?? addResult.status
+      expect(serverStatus.status).toBe("connected")
+
+      const tools = await MCP.tools()
+      expect(Object.keys(tools).some((key) => key.includes("sdk_tool"))).toBe(true)
+
+      await MCP.disconnect("sdk-server")
+      expect(closed).toBe(true)
+    } finally {
+      unregister()
+    }
   }),
 )

@@ -1248,7 +1248,7 @@ export namespace ACP {
               {
                 directory,
                 name: key,
-                config: mcp,
+                config: mcp as Extract<Config.Mcp, { type: "local" | "remote" }>,
               },
               { throwOnError: true },
             )

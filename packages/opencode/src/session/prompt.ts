@@ -43,6 +43,7 @@ import { AppFileSystem } from "@/filesystem"
 import { Truncate } from "@/tool/truncate"
 import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util/process"
+import { OutputStyle } from "@/output-style"
 import { Cause, Effect, Exit, Layer, Option, Scope, ServiceMap } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
@@ -1464,13 +1465,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
               yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
-              const [skills, env, instructions, modelMsgs] = yield* Effect.all([
+              const [skills, style, env, instructions, modelMsgs] = yield* Effect.all([
                 Effect.promise(() => SystemPrompt.skills(agent)),
+                Effect.promise(() => SystemPrompt.outputStyle()),
                 Effect.promise(() => SystemPrompt.environment(model)),
                 instruction.system().pipe(Effect.orDie),
                 MessageV2.toModelMessagesEffect(msgs, model),
               ])
-              const system = [...env, ...(skills ? [skills] : []), ...instructions]
+              const system = [...env, ...(skills ? [skills] : []), ...(style ? [style] : []), ...instructions]
               const format = lastUser.format ?? { type: "text" as const }
               if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
               const result = yield* handle.process({
@@ -1677,6 +1679,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         Layer.provide(MCP.defaultLayer),
         Layer.provide(LSP.defaultLayer),
         Layer.provide(FileTime.defaultLayer),
+        Layer.provide(OutputStyle.defaultLayer),
         Layer.provide(ToolRegistry.defaultLayer),
         Layer.provide(Truncate.layer),
         Layer.provide(Provider.defaultLayer),

@@ -13,6 +13,7 @@ import PROMPT_CODEX from "./prompt/codex.txt"
 import PROMPT_TRINITY from "./prompt/trinity.txt"
 import type { Provider } from "@/provider/provider"
 import type { Agent } from "@/agent/agent"
+import { OutputStyle } from "@/output-style"
 import { Permission } from "@/permission"
 import { Skill } from "@/skill"
 
@@ -80,5 +81,11 @@ export namespace SystemPrompt {
       // version of them here and a less verbose version in tool description, rather than vice versa.
       Skill.fmt(list, { verbose: true }),
     ].join("\n")
+  }
+
+  export async function outputStyle() {
+    const style = await OutputStyle.active()
+    if (!style || !style.prompt.trim()) return
+    return [`# Output Style: ${style.name}`, style.prompt].join("\n")
   }
 }
